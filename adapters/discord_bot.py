@@ -36,22 +36,38 @@ HELP_TEXT = """🎲 **v4 引擎指令 / Commands**（11 個）
 
 **玩家 / Player**
 `/explore <text>` — 探索／對話／移動（非戰鬥行動）
-`/combat` — 戰鬥行動（攻擊／物品／技能／防禦／撤退）
-`/roll [expr]` — 擲骰（`/roll d20`、`/roll 2d6+3`）
+　· 引擎即時判定（搜索/NPC對話/場景移動），敘事隨後補上
+　· 範例：`/explore 依思詢問船長關於巴鐸的線索`
+
+`/combat` — 戰鬥行動（RPG 選單，自動完成挑選目標和招式）
+　· action：⚔️攻擊 🎒物品 ✨技能 🛡防禦 🏃撤退 👁觀察
+　· 範例：`/combat action:攻擊 target:哥布林① move:詛咒木杖`
+
+`/roll [expr]` — 擲骰（`/roll d20`、`/roll 2d6+3`、`/roll adv`）
+
 `/give <item> [to]` — 把物品給隊友
-`/status` — 隊伍／場景狀態
-`/continue` — 遊戲卡住時推進
+
+`/status` — 隊伍 HP／法術格／場景／戰鬥狀態
+
+`/continue` — 遊戲卡住時推進（顯示待確認／戰鬥輪到誰／場景重述）
+
 `/help` — 本說明
 
 **管理員 / Admin**
-`/explore-admin <text> <char>` — 以任意角色行動
-`/combat-admin` — 以任意角色戰鬥
+`/explore-admin <text> <char>` — 以任意角色探索
+`/combat-admin` — 以任意角色戰鬥（同 /combat 選單）
 `/roll-admin <expr> <char>` — 代擲
 `/give-admin <char> <item> [qty]` — 給物品
 
-**頻道內關鍵字**（直接打字）：
-`status` `inv` `moves` `scene` — 即時查詢（無 LLM）
-其他文字＝桌邊聊天（DM 不回應）"""
+**頻道內關鍵字**（直接打字，即時回應、無 LLM）：
+`status` — 隊伍狀態
+`inv` — 物品清單
+`moves` — 招式一覽
+`scene` — 場景描述
+
+**桌邊聊天**：直接打字＝玩家間對話（引擎記錄但不回應）
+**角色限制**：只能控制自己擁有的角色（引擎強制）
+**NPC 對話**：NPC 只會透露其已知的事實（引擎管理）"""
 
 
 class DiscordBot(discord.Client):
