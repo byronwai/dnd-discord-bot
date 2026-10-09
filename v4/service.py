@@ -237,4 +237,10 @@ class V4Service:
                 self._recent_narrations.append(narration)
                 self._recent_narrations = self._recent_narrations[-5:]
         self._save()
+        # v3 lesson: every turn ends with a hook — scene, status, options
+        if r.accepted and r.lines:
+            from .templates import render_turn_context
+            context = render_turn_context(g, it.actor or "")
+            r.lines.append("")
+            r.lines.append(context)
         return r.lines, narration

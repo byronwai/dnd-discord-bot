@@ -122,4 +122,75 @@ def render_hint(entry, game=None) -> str:
     if kind == "talk":
         return entry.text
 
+
+# ---- turn context: the v3 "every turn ends with a hook" guarantee ----
+
+def scene_header(g) -> str:
+    """Context bar: where, description, NPCs, exits."""
+    s = g.world.here
+    lines = [f"📍 {s.name}"]
+    if s.description:
+        lines.append(f"   {s.description[:80]}")
+    if s.npcs:
+        lines.append(f"   👥 {'、'.join(n['name'] for n in s.npcs)}")
+    if s.exits:
+        lines.append(f"   🚪 {'、'.join(s.exits.values())}")
+    return "\n".join(lines)
+
+
+def suggested_actions(g, actor: str = "") -> list[str]:
+    """2-4 concrete next-step options, scene-aware."""
+    s = g.world.here
+    opts = []
+    for n in s.npcs:
+        knows = n.get("knows", [])
+        if knows:
+            opts.append(f"向 **{n['name']}** 打聽（知道 {len(knows)} 件事）")
+        else:
+            opts.append(f"和 **{n['name']}** 交談")
+    for sid, label in list(s.exits.items())[:2]:
+        opts.append(f"前往「{label}」")
+    if s.hidden_items:
+        opts.append("搜索這裡（有隱藏物品）")
+    else:
+        opts.append("搜索這裡")
+    if g.combat.active:
+        cur = g.combat.current()
+        if cur:
+            opts.append(f"⚔️ `/combat`（輪到 {cur['name']}）")
+    else:
+        hurt = any(e.get("hp_now", 99) < e.get("hp_max", 1) // 2
+                   for e in g.party.values() if isinstance(e, dict))
+        if hurt:
+            opts.append("休息恢復（`/explore 我們休息`）")
+    return opts[:4]
+
+
+def render_turn_context(g, actor: str = "") -> str:
+    """Full guidance block appended after engine output:
+    scene header + party HP + combat status + suggested actions.
+    This replaces v3's constitutional 'every turn ends with a hook'."""
+    lines = [scene_header(g)]
+    hp_line = " · ".join(f"{n} {e['hp_now']}/{e['hp_max']}HP"
+                         for n, e in g.party.items()
+                         if isinstance(e, dict))
+    if hp_line:
+        lines.append(f"❤️ {hp_line}")
+    if g.combat.active:
+        cur = g.combat.current()
+        if cur:
+            tag = "（敵）" if cur.get("npc") else ""
+            lines.append(f"⚔️ 戰鬥 R{g.combat.round} — 輪到 "
+                         f"**{cur['name']}**{tag}")
+        for n, f in g.enemies.items():
+            if not f.dead:
+                lines.append(f"   👹 {n} {f.hp}/{f.hp_max}HP AC{f.ac}")
+    opts = suggested_actions(g, actor)
+    if opts:
+        lines.append("")
+        lines.append("**👉 你可以：**")
+        for o in opts:
+            lines.append(f"  · {o}")
+    return "\n".join(lines)
+
     return ""  # deny/pass/auto/meta stay silent in prose

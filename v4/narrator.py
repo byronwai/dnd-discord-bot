@@ -52,7 +52,9 @@ class Narrator:
             + "\n".join(f"- {f}" for f in facts) + "）\n"
             f"{npc_block}"
             "你是地下城主。把「骨架句」潤飾成 80~160 字的繁體中文敘事。\n"
-            "只補感官細節與氛圍；行動者、成敗、對象一律照抄。"
+            "只補感官細節與氛圍；行動者、成敗、對象一律照抄。\n"
+            "結尾必須留一個鉤子：一個未解的疑問、一個迫近的選擇、"
+            "或一個環境細節暗示下一步。"
             + tail)
         try:
             async with httpx.AsyncClient(timeout=180) as c:
