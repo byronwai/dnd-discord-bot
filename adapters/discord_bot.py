@@ -926,7 +926,7 @@ class DiscordBot(discord.Client):
                                "給玩家一個新的視角或鉤子，推進故事。"])
                     if narr:
                         lines.append("📖 " + narr)
-                await interaction.response.send_message("\n".join(lines)[:1900])
+                await interaction.followup.send("\n".join(lines)[:1900])
                 return
             if self.engine.turn_in_flight("discord", cid):
                 await interaction.response.send_message(
