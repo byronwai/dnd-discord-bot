@@ -16,9 +16,11 @@ class Narrator:
     async def narrate(self, facts: list, scene: str, party_brief: str,
                       hints: list = (), npc_knows: list = None,
                       npc_name: str = "",
-                      extra_directive: str = None) -> str:
+                      extra_directive: str = None,
+                      on_delta=None) -> str:
         """hints = engine prose skeletons; npc_knows = facts an NPC may
-        reveal; extra_directive = turn-level hard rule (repetition break).
+        reveal; extra_directive = turn-level hard rule; on_delta = streaming
+        callback for v3-style word-by-word UX.
         v3 lesson: most critical rules go at the END (canonical tail)."""
         if not facts:
             return ""
@@ -68,13 +70,50 @@ class Narrator:
             "結尾必須留一個鉤子：未解的疑問、迫近的選擇、或暗示。"
             + tail)
         try:
-            async with httpx.AsyncClient(timeout=180) as c:
-                r = await c.post(f"{self.url}/v1/chat/completions", json={
+            if on_delta:
+                # streaming: call on_delta as tokens arrive (v3 UX)
+                import json as _json
+                body = {
                     "model": self.model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.7, "max_tokens": 400})
-                r.raise_for_status()
-                text = (r.json()["choices"][0]["message"]["content"] or "").strip()
+                    "temperature": 0.7, "max_tokens": 400,
+                    "stream": True}
+                text = ""
+                async with httpx.AsyncClient(timeout=180) as c:
+                    async with c.stream(
+                        "POST", f"{self.url}/v1/chat/completions",
+                        json=body
+                    ) as resp:
+                        resp.raise_for_status()
+                        async for line in resp.aiter_lines():
+                            if not line.startswith("data: "):
+                                continue
+                            payload = line[6:].strip()
+                            if payload == "[DONE]":
+                                break
+                            try:
+                                delta = _json.loads(payload)[
+                                    "choices"][0]["delta"].get(
+                                    "content", "")
+                                if delta:
+                                    text += delta
+                                    try:
+                                        on_delta(text)
+                                    except Exception:
+                                        pass
+                            except (KeyError, IndexError,
+                                    _json.JSONDecodeError):
+                                continue
+                return text.strip()
+            else:
+                # non-streaming (CLI, tests)
+                async with httpx.AsyncClient(timeout=180) as c:
+                    r = await c.post(f"{self.url}/v1/chat/completions", json={
+                        "model": self.model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.7, "max_tokens": 400})
+                    r.raise_for_status()
+                    text = (r.json()["choices"][0]["message"]["content"] or "").strip()
             return text
         except Exception:
             return ""  # degraded mode: engine lines stand alone

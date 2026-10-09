@@ -714,28 +714,51 @@ class DiscordBot(discord.Client):
 
         async def _v4_turn(interaction, text, echo=None,
                            structured=False):
-            """Player v4 turn: public echo → engine output → narrate.
-            structured=True skips the digestor (from /combat dropdowns)."""
-            # public echo: other players need to see what was issued
-            # (slash command inputs are invisible in the channel)
+            """Player v4 turn — v3-style UX:
+            1. Echo immediately (channel message, not defer)
+            2. Engine output immediately after resolution
+            3. Narration streams into a placeholder message"""
+            # 1. echo — immediate, visible to everyone
             await interaction.channel.send(
                 f"🎭 **{interaction.user.display_name}** "
                 f"{_clip(text, 200)}")
-            await interaction.response.defer(thinking=True)
+
+            # 2. create narration placeholder (streams later)
+            narr_msg = await interaction.channel.send("📖 DM 正在寫作…")
+            last_edit = [0.0]
+
+            def on_delta(acc: str):
+                now = asyncio.get_event_loop().time()
+                if now - last_edit[0] >= 2.0 and len(acc) > 20:
+                    last_edit[0] = now
+                    asyncio.create_task(_edit_safe(narr_msg, acc))
+
+            # 3. process the turn (engine instant, narrator streams)
             try:
-                lines, narration = await svc._v4_service(str(interaction.channel_id)).handle(
+                lines, narration = await svc._v4_service(
+                    str(interaction.channel_id)).handle(
                     text, interaction.user.display_name,
                     user_id=str(interaction.user.id),
-                    structured=structured)
+                    structured=structured,
+                    on_delta=on_delta)
             except Exception as e:
                 log.exception("v4 turn failed")
-                await interaction.followup.send(f"⚠️ {e}")
+                await narr_msg.edit(content=f"⚠️ {e}")
                 return
+
+            # 4. send engine output (replaces placeholder)
             body = "\n".join(lines)
             if body:
-                await interaction.followup.send(_clip(body))
+                await narr_msg.edit(content=_clip(body))
+            # 5. narration as a follow-up message
             if narration:
-                await interaction.followup.send("📖 " + _clip(narration))
+                await interaction.channel.send("📖 " + _clip(narration))
+
+        async def _edit_safe(msg, content):
+            try:
+                await msg.edit(content=_clip(content) + " ▍")
+            except discord.HTTPException:
+                pass
 
         async def _v4_admin(interaction, character, text):
             """Admin v4 turn for any character — with public echo."""

@@ -111,7 +111,8 @@ class V4Service:
 
     async def handle(self, text: str, author: str = "",
                      user_id: str = "",
-                     structured: bool = False) -> tuple[list, str]:
+                     structured: bool = False,
+                     on_delta=None) -> tuple[list, str]:
         """Free-form text in → (engine lines, narration). Never raises.
         user_id: Discord uid — the engine enforces that only the character's
         owner can act as that character.
@@ -220,7 +221,7 @@ class V4Service:
             narration = await self.narrator.narrate(
                 safe_facts, g.world.here.name, safe_brief, hints=safe_hints,
                 npc_knows=safe_knows, npc_name=npc_name,
-                extra_directive=rep_hint)
+                extra_directive=rep_hint, on_delta=on_delta)
             # force Traditional Chinese (models skew Simplified)
             try:
                 from opencc import OpenCC
