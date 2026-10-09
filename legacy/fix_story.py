@@ -4,7 +4,7 @@ sys.path.insert(0, "/home/byronwai/dnd-dm-bot")
 from engine.dm import DMEngine
 
 e = DMEngine("http://127.0.0.1:8080", "dnd-dm", "/home/byronwai/dnd-dm-bot/data")
-P, C = "discord", "1557388849959674006"
+P, C = "discord", "<CHANNEL_ID>"
 
 party = e.get_party(P, C)
 print("目前職業：", {n: v.get("occupation") for n, v in party.items() if isinstance(v, dict)})

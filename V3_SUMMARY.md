@@ -103,7 +103,7 @@
 ## 七、運維速查
 
 ```bash
-ssh -i keys/dnd_ed25519 <SSH_GB10>      # 主力（sudo 密碼 comfyui）
+ssh -i keys/dnd_ed25519 <SSH_GB10>      # 主力（sudo 密碼 <REDACTED>）
 sudo systemctl restart dm-bot dnd-health          # 兩服務
 ~/dnd-dm-bot/venv/bin/python ~/dnd-dm-bot/tools/status.py
 # 備份：GB10 data/campaign.db.v3-20261009.bak；本機 dnd-dm-bot-export-20261009.tgz

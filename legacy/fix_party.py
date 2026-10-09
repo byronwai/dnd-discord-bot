@@ -5,7 +5,7 @@ from engine.dm import DMEngine
 from engine.commands import roll_stats_by_class
 
 e = DMEngine("http://127.0.0.1:8080", "dnd-dm", "/home/byronwai/dnd-dm-bot/data")
-P, C = "discord", "1557388849959674006"
+P, C = "discord", "<CHANNEL_ID>"
 party = e.get_party(P, C)
 
 party["依思"] = {
