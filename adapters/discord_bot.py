@@ -148,7 +148,7 @@ class DiscordBot(discord.Client):
             if not char:
                 return [app_commands.Choice(name="（先用 /explore 建立角色）",
                                             value="")]
-            from engine.dm import compute_attack_moves
+            from engine.moves import compute_attack_moves
             inv = [("item", n, q) for n, q in g.inventory.get(char, [])]
             mx = g.max_slot(char)
             moves = compute_attack_moves(
@@ -345,7 +345,7 @@ class DiscordBot(discord.Client):
                 lines.append("  " + " · ".join(
                     f"L{k} {v}" for k, v in slots.items()))
             # moves
-            from engine.dm import compute_attack_moves, \
+            from engine.moves import compute_attack_moves, \
                 DMEngine
             inv_tuples = [("item", n, q) for n, q in inv]
             mx = g.max_slot(char)
@@ -358,7 +358,7 @@ class DiscordBot(discord.Client):
             lines.append("")
             lines.append("**招式 / Moves**")
             for m in all_moves:
-                req = DMEngine.MOVE_SPELL_LEVEL.get(m["name"], 0)
+                req = move_spell_level.get(m["name"], 0)
                 aoe = "（範圍）" if m["aoe"] else ""
                 if m in moves:
                     cost = f"（耗 {req} 環法術格）" if req else ""

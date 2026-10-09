@@ -1,5 +1,8 @@
 __pycache__/
 *.tgz
+*.bak
 data/*.db
+data/*.json
 keys/
 .env
+.zcodeignore

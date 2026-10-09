@@ -346,7 +346,7 @@ def moves_text(db_path: str, char_filter: str = "") -> str:
     with the slot level that unlocks them."""
     if DM_BOT_HOME not in sys.path:
         sys.path.insert(0, DM_BOT_HOME)
-    from engine.dm import DMEngine, compute_attack_moves
+    from engine.moves import compute_attack_moves, move_spell_level
     from engine.charlib import slots_for
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
@@ -377,7 +377,7 @@ def moves_text(db_path: str, char_filter: str = "") -> str:
                 f"L{k} {cur.get(str(k), n)}/{n}" for k, n in sorted(mx.items()))
         lines.append(f"**{name}**（{occ} Lv{lvl}）{slot_txt}")
         for m in compute_attack_moves(occ, lvl, inv.get(name, []), 99):
-            req = DMEngine.MOVE_SPELL_LEVEL.get(m["name"], 0)
+            req = move_spell_level.get(m["name"], 0)
             aoe = "（範圍）" if m["aoe"] else ""
             if req > max_slot:
                 lines.append(f"　🔒 {m['name']} {m['ability']} {m['dmg']}{aoe}"

@@ -1,69 +1,121 @@
-# D&D DM Bot (Discord · GB10 DGX Spark)
+# D&D DM Bot — v4 Engine-Driven
 
-Self-hosted Dungeon Master bot for **Discord**, powered by a local Ollama LLM
-(gemma3:27b-it-qat) on an NVIDIA GB10 (DGX Spark, 128GB unified memory) —
-no cloud APIs.
+Self-hosted Dungeon Master for Discord. **Game engine does 70%** (rules,
+state, combat, dice); **LLM does 30%** (reading player intent, writing
+prose). The game is fully playable without any LLM.
+
+## Architecture
 
 ```
-dnd-dm-bot/
-├── bot.py               # entry point: starts the Discord adapter
-├── engine/
-│   ├── dm.py            # session persistence (SQLite), prompt, LLM streaming
-│   ├── compendium.py    # always-on core-rules block (SRD distillate)
-│   ├── rules.py         # SRD retrieval v2: zh glossary, gating, hybrid scoring
-│   ├── dice.py          # dice roller: 2d6+3, 4d6kh3, adv/dis, [[dice]] in narration
-│   ├── checks.py        # consent-based checks: [[check:DC|char|ABILITY]] cards
-│   ├── state.py         # state tags: [[hp]] [[item]] [[scene]] [[objective]] [[xp]]
-│   └── commands.py      # shared command text + fair character creation
-├── adapters/
-│   └── discord_bot.py   # /help /new /roll /pc /party /combat /move …
-├── tools/
-│   ├── ingest_srd.py    # build rules.db from SRD markdown (schema v2)
-│   ├── migrate_discord_only.py  # one-off: fold shared tables into Discord chats
-│   └── playtest.py      # end-to-end smoke test against the live LLM
-└── deploy/gb10/dm-bot.service
+Player text ──→ [Digestor LLM 12b] ──→ Intent JSON
+                                             │
+                                             ▼
+                                    [GAME ENGINE]  ←── no LLM
+                                    validate + resolve
+                                    dice · HP · items · combat · scenes
+                                             │
+                                             ▼
+                                    [Ledger]  append-only facts
+                                             │
+                              ┌──────────────┼──────────────┐
+                              ▼              ▼              ▼
+                        [Templates]    [Narrator 27b]   [Debug Portal]
+                        skeleton prose  polish + flavour  #dnd-health
+                        (no LLM)        (s2t + guards)    log stream
 ```
 
-## How it plays
-- Talk in plain language; the DM narrates and streams the reply.
-- **Engine decides, model narrates**: dice, DCs, HP, items and XP are all
-  computed by deterministic code; the LLM only writes the story.
-- **Consent checks**: the DM emits `[[check:DC|角色|屬性]]` → the player sees
-  a check card (需骰 ≥ N) and replies 骰/roll → the server rolls d20+real
-  modifier and the verdict is final.
-- **Rules grounding, two layers**:
-  1. `engine/compendium.py` — the SRD's core mechanics (checks, attack math,
-     actions in combat, conditions, dying, concentration, resting), verified
-     against the handbook and injected into EVERY prompt.
-  2. `engine/rules.py` — hybrid retrieval (mxbai embeddings + title/body
-     lexical signals + zh→en glossary) over ~2,900 SRD chunks for the long
-     tail: exact spells, monsters, items, class features. Junk sources
-     (spell name indexes, A-Z duplicates) are excluded at ingest, and chunk
-     vectors embed title+body so "火球術" finds Fireball.
-- `/new <setting>` starts a fresh adventure; `/pc` builds the party sheet
-  (attributes rolled server-side or the exact standard array — no cheating);
-  long sessions auto-summarize into an adventure log.
-- `/combat start` → `/move` per player (1 player 1 move), `/voteskip`,
-  admin `/takeover`; initiative d20+DEX; XP/levels via `[[xp:...]]` tags.
+## Quick Start
 
-## Operate (GB10)
 ```bash
-ssh -i keys/dnd_ed25519 comfyui@10.5.28.210
-sudo systemctl restart dm-bot            # after engine/code edits
-sudo journalctl -u dm-bot -f             # live logs
-~/dnd-dm-bot/venv/bin/python ~/dnd-dm-bot/tools/status.py
-~/dnd-dm-bot/venv/bin/python ~/dnd-dm-bot/tools/playtest.py   # e2e smoke test
-# rebuild rules index (~60s):
-EMBED_PREFIX= ~/dnd-dm-bot/venv/bin/python ~/dnd-dm-bot/tools/ingest_srd.py \
-  ~/srd ~/dnd-dm-bot/data/rules.db http://127.0.0.1:11434 mxbai-embed-large
+# GB10 (or any box with Ollama)
+pip install -r requirements.txt
+cp .env.example .env        # fill DISCORD_TOKEN, LLM_URL, V4_CHANNEL_ID
+python bot.py
+
+# no-LLM test (proves the engine works standalone)
+python v4/cli.py selftest
+
+# interactive CLI (zero LLM)
+python v4/cli.py
 ```
 
-Expected pace: a DM turn (~200 tokens) takes roughly 16-24s on the 27b —
-slower than the old 12b but with much stronger rule discipline and Chinese.
+## Commands (13)
 
-## Fill in token
-Edit `.env` (see `.env.example`):
-- `DISCORD_TOKEN=` — from https://discord.com/developers/applications
-  (create an app → Bot → Token; **enable MESSAGE CONTENT INTENT**)
+| Player | Admin |
+|---|---|
+| `/explore <text>` — freeform action | `/explore-admin <text> <char>` |
+| `/combat` — RPG menu (autocomplete) | `/combat-admin` |
+| `/confirm` — confirm pending action | |
+| `/inventory` — items + slots + moves | |
+| `/roll [expr]` — dice | `/roll-admin <expr> <char>` |
+| `/give <item> [to]` — transfer | `/give-admin <char> <item> [qty]` |
+| `/status` — party + scene | |
+| `/continue` — unstuck | |
+| `/help` | |
 
-SRD source: github.com/OldManUmby/DND.SRD.Wiki (reForged layout), CC-BY 4.0.
+**In-channel keywords** (instant, no LLM): `status` `inv` `moves` `scene`
+
+**Plain text** = table talk (silently ignored, no reaction, no reply)
+
+## Design Principles
+
+1. **Engine decides, model narrates** — the LLM has no write path to game
+   state; it reads facts and writes prose
+2. **Predict the narration** — the engine renders prose skeletons from its
+   own data; the narrator only adds atmosphere
+3. **NPC knowledge is data** — each NPC has a `knows` list; the narrator
+   can only reveal those facts
+4. **No LLM required** — the CLI proves the full game (combat, items,
+   scenes, checks) works with zero model calls
+5. **v3 lessons ported** — placeholder names, fake-dice scrubbing,
+   repetition guard, language enforcement, input sanitization
+
+## File Structure
+
+```
+v4/                     # game engine (the core)
+├── intent.py           # Intent dataclass + deterministic parser
+├── world.py            # Scene graph, NPCs (with knows), encounters
+├── turn.py             # Game state: party, combat, inventory, slots
+├── rules_core.py       # validate + resolve (the only write path)
+├── ledger.py           # append-only event log (replayable)
+├── digestor.py         # 12b: freeform text → Intent JSON
+├── narrator.py         # 27b: facts + skeletons → prose
+├── templates.py        # deterministic prose skeletons
+├── guards.py           # v3 defenses (placeholders, scrubbing, etc.)
+├── service.py          # orchestration + persistence
+└── cli.py              # no-LLM REPL + selftest
+
+engine/                 # shared pure math (no LLM, no Discord)
+├── charlib.py          # AC, PB, slots, save/skill proficiencies
+├── dice.py             # dice expressions (4d6kh3, adv, etc.)
+├── checks.py           # total modifier calculator
+└── moves.py            # class move tables + compute_attack_moves
+
+adapters/
+└── discord_bot.py      # 13 slash commands + channel routing
+
+health/
+└── health_board.py     # debug portal (log stream + /moves)
+
+tools/                  # operational scripts
+├── ingest_srd.py       # build rules.db from SRD markdown
+├── playtest.py         # e2e smoke test
+└── status.py           # game status report
+
+legacy/                 # v3 code (archived, not imported)
+```
+
+## Models
+
+| Role | Model | Purpose |
+|---|---|---|
+| Digestor | gemma3:12b-it-qat | Player text → Intent JSON |
+| Narrator | gemma3:27b-it-qat | Facts → prose (80–160 字) |
+
+Both optional — game runs without them.
+
+## License
+
+SRD content: CC-BY 4.0 (Wizards of the Coast)
+Code: see LICENSE
