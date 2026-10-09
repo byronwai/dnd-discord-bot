@@ -238,9 +238,11 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         # confirm only when the digestor is genuinely uncertain (freeform
         # /explore with ambiguous phrasing); /combat always sets confidence=1
         if it.confidence < 0.7 and not it.args.get("confirmed"):
+            alt = ("`/combat` 選擇行動" if g.combat.active
+                   else "`/explore` 描述其他行動")
             return ResolveResult(
                 [f"❓ 我理解你要：**{actor} 攻擊 {it.target}**"
-                 "——用 `/confirm` 執行，或 `/explore` 描述其他行動。"],
+                 f"——用 `/confirm` 執行，或 {alt}。"],
                 confirm=it)
         r = _attack(g, actor, it.target, it.args.get("move", ""))
         _post_rotation(g)
