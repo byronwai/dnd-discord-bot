@@ -11,3 +11,4 @@ MEMORY.md
 .zcodeignore
 deploy/
 legacy/*.service
+legacy/*.py
