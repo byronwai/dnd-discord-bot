@@ -15,10 +15,11 @@ class Narrator:
 
     async def narrate(self, facts: list, scene: str, party_brief: str,
                       hints: list = (), npc_knows: list = None,
-                      npc_name: str = "") -> str:
+                      npc_name: str = "",
+                      extra_directive: str = None) -> str:
         """hints = engine prose skeletons; npc_knows = facts an NPC may
-        reveal (None = no NPC dialogue this turn). The LLM's ONLY job is
-        atmosphere — never game content, never dice, never outcomes."""
+        reveal; extra_directive = turn-level hard rule (repetition break).
+        v3 lesson: most critical rules go at the END (canonical tail)."""
         if not facts:
             return ""
         hint_block = ""
@@ -36,19 +37,23 @@ class Narrator:
                 "絕不得透露不在清單上的資訊（不得給予地點、物品、"
                 "攻略建議、劇情推測）；可以閒聊、可以拒絕回答、"
                 "可以要求交換條件。\n")
+        # v3 lesson: most critical rules at the END (small models attend
+        # most to recent tokens — canonical tail principle)
+        tail = (
+            "\n\n=== 最後指示（最高優先）===\n"
+            "· 繁體中文，絕不使用簡體字\n"
+            "· 絕不寫出任何骰子數值、算式或判定結果\n"
+            "· 絕不新增引擎事實以外的內容（物品、傷害、地點）\n")
+        if extra_directive:
+            tail += f"· {extra_directive}\n"
         prompt = (
-            "你是地下城主。把下列「骨架句」潤飾成 80~160 字、連貫的"
-            "繁體中文敘事段落。\n"
-            "鐵律（絕對遵守）：\n"
-            "· 骨架句裡的行動者、成敗、對象一律照抄不得更改\n"
-            "· 不得新增任何判定、傷害、物品或行動\n"
-            "· 不要列出數字算式\n"
-            "· 只補感官細節與氛圍\n"
-            "· 絕不使用簡體字\n"
-            f"{npc_block}"
             f"場景：{scene}\n隊伍現況：{party_brief}{hint_block}\n"
             "（引擎事實，僅供核對，不要複述：\n"
-            + "\n".join(f"- {f}" for f in facts) + "）")
+            + "\n".join(f"- {f}" for f in facts) + "）\n"
+            f"{npc_block}"
+            "你是地下城主。把「骨架句」潤飾成 80~160 字的繁體中文敘事。\n"
+            "只補感官細節與氛圍；行動者、成敗、對象一律照抄。"
+            + tail)
         try:
             async with httpx.AsyncClient(timeout=180) as c:
                 r = await c.post(f"{self.url}/v1/chat/completions", json={

@@ -28,6 +28,7 @@ class V4Service:
         self.narrator = Narrator(llm_url, narr_model)
         self.game: Game = self._load() or build_demo_game()
         self.pending = None  # Intent awaiting the player's 確認
+        self._recent_narrations: list[str] = []  # v3: repetition guard
 
     # ---------- persistence ----------
 
@@ -142,12 +143,21 @@ class V4Service:
                 return ([f"🚫 {it.actor} 屬於其他玩家——"
                          "你不能控制這個角色。"], "")
         idx0 = len(g.ledger.entries)  # this turn's slice of the ledger
+        # player input scrubbing (v3: injection defense)
+        from .guards import scrub_input
+        clean_text, was_scrubbed = scrub_input(t)
+        if was_scrubbed:
+            g.ledger.add(author or "?", "deny",
+                         "已過濾可疑指令文字", reason="injection")
         r = resolve(g, it)
         if r.confirm is not None:
             self.pending = r.confirm
         narration = ""
         if r.accepted and r.lines and self.pending is None:
             from .templates import render_hint
+            from .guards import (make_placeholder_map, make_restore_map,
+                                 map_out, map_in, scrub_narration,
+                                 is_repetition, is_chinese)
             hints = [h for h in (render_hint(e, g)
                                  for e in g.ledger.entries[idx0:]) if h]
             facts = [e.text for e in g.ledger.entries[idx0:]]
@@ -162,16 +172,45 @@ class V4Service:
                         if n["name"] == npc_name:
                             npc_knows = n.get("knows", [])
                             break
+            # v3 guard: placeholder names — narrator never sees real names
+            pmap = make_placeholder_map(list(g.party))
+            rmap = make_restore_map(list(g.party))
+            safe_hints = [map_out(h, pmap) for h in hints]
+            safe_facts = [map_out(f, pmap) for f in facts]
+            safe_brief = map_out(brief, pmap)
+            safe_knows = ([map_out(k, pmap) for k in npc_knows]
+                          if npc_knows else npc_knows)
+            # v3 guard: repetition — if the last narrations were near-
+            # identical, inject a hard break directive
+            rep_hint = None
+            if is_repetition(" ".join(safe_hints), self._recent_narrations):
+                rep_hint = ("⚠️ 你最近的敘述幾乎相同——這次必須完全不同。"
+                            "換一個場景細節、感官或節奏。")
             narration = await self.narrator.narrate(
-                facts, g.world.here.name, brief, hints=hints,
-                npc_knows=npc_knows, npc_name=npc_name)
+                safe_facts, g.world.here.name, safe_brief, hints=safe_hints,
+                npc_knows=safe_knows, npc_name=npc_name,
+                extra_directive=rep_hint)
             # force Traditional Chinese (models skew Simplified)
             try:
                 from opencc import OpenCC
                 narration = OpenCC("s2t").convert(narration)
             except ImportError:
                 pass
+            # v3 guard: scrub fake dice/verdicts from narration
+            narration, was_scrubbed_n = scrub_narration(narration)
+            if was_scrubbed_n:
+                g.ledger.add("engine", "guard",
+                             "已從敘事中清除假骰/判定文字")
+            # v3 guard: language check — if still not Chinese, degrade
+            if narration and not is_chinese(narration):
+                narration = ""  # reject non-Chinese output
+            # v3 guard: restore real names before showing to players
+            narration = map_in(narration, rmap)
             if not narration and hints:
-                narration = "\n".join(hints)  # degraded: skeleton IS prose
+                narration = map_in("\n".join(hints), rmap)  # degraded
+            # track for repetition guard
+            if narration:
+                self._recent_narrations.append(narration)
+                self._recent_narrations = self._recent_narrations[-5:]
         self._save()
         return r.lines, narration
