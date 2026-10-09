@@ -18,6 +18,37 @@ from .intent import Intent
 from .turn import Game
 
 _POTION = re.compile(r"治療藥水|治療药水|healing potion", re.I)
+_ORD_RE = re.compile(r"第?\s*([0-9一二三四五六七八九十]+)\s*[隻个個號号]")
+_ZH_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+           "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+
+
+def resolve_target(g: Game, target: str):
+    """(enemy, party_char) for a target string — fuzzy plus ordinal forms
+    （第一隻哥布林 → 哥布林①）. The digestor normalizes most names;
+    this is the engine-side safety net."""
+    t = (target or "").strip()
+    if not t:
+        return None, None
+    for n, f in g.enemies.items():
+        if t == n or t in n or n in t:
+            return f, None
+    for n in g.party:
+        if t == n or t in n or n in t:
+            return None, n
+    m = _ORD_RE.search(t)
+    if m:
+        raw = m.group(1)
+        num = _ZH_NUM.get(raw, int(raw) if raw.isdigit() else 1)
+        base = (t[:m.start()] + t[m.end():]).strip()
+        want = base + (chr(0x2460 + num - 1) if 1 <= num <= 10 else "")
+        for n, f in g.enemies.items():
+            if n == want:
+                return f, None
+        for n, f in g.enemies.items():
+            if base and base in n:
+                return f, None
+    return None, None
 
 
 class ResolveResult:
@@ -45,9 +76,8 @@ def validate(g: Game, it: Intent) -> str | None:
         if not any(s[0] == it.item for s in g.inventory.get(actor, [])):
             return f"{actor} 沒有「{it.item}」"
     if it.action == "attack":
-        names = list(g.enemies) + list(g.party)
-        if not any(it.target and (it.target == n or it.target in n
-                                  or n in it.target) for n in names):
+        foe, tgt_char = resolve_target(g, it.target)
+        if foe is None and tgt_char is None:
             return f"找不到目標「{it.target}」"
     return None
 
@@ -95,18 +125,8 @@ def _attack(g: Game, actor: str, target: str, move: str = "") -> ResolveResult:
     if req and not g.spend_slot(actor, req):
         return ResolveResult([f"⚠️ {actor} 的 {req} 環法術格已用盡——改用其他招式。"],
                              accepted=False)
-    # target: enemy slot first, then party
-    foe = None
-    for n, f in g.enemies.items():
-        if target and (target == n or target in n or n in target):
-            foe = f
-            break
-    tgt_char = None
-    if foe is None:
-        for n in g.party:
-            if target and (target == n or target in n or n in target):
-                tgt_char = n
-                break
+    # target: enemy slot first, then party (ordinal-aware)
+    foe, tgt_char = resolve_target(g, target)
     if foe is None and tgt_char is None:
         return ResolveResult([f"找不到目標「{target}」"], accepted=False)
     ac = foe.ac if foe else g.ac_of(tgt_char)

@@ -11,6 +11,7 @@ Commands: /help /new /roll /pc /party /here /reset /say (+ !-prefixed twins in f
 
 import asyncio
 import logging
+import os
 import re
 import time
 
@@ -86,6 +87,7 @@ class DiscordBot(discord.Client):
         self.engine = engine
         self.bound_channels: set[int] = set()
         self.tree = app_commands.CommandTree(self)
+        self.v4 = None  # lazy V4Service for the engine-driven playground
         self._register_commands()
 
     async def setup_hook(self):
@@ -1209,12 +1211,39 @@ class DiscordBot(discord.Client):
             return True
         return False
 
+    async def _v4_message(self, message: discord.Message):
+        """Engine-driven v4 turn: digest → engine (instant) → narrate."""
+        if self.v4 is None:
+            from v4.service import V4Service
+            self.v4 = V4Service(
+                os.environ.get("DATA_DIR", "data"),
+                os.environ.get("LLM_URL", "http://127.0.0.1:11434"),
+                os.environ.get("V4_DIGEST_MODEL", "gemma3:12b-it-qat"),
+                os.environ.get("V4_NARR_MODEL", "gemma3:27b-it-qat"))
+        status = await message.channel.send("⚙️ 引擎處理中…")
+        try:
+            lines, narration = await self.v4.handle(
+                message.content, message.author.display_name)
+        except Exception as e:
+            log.exception("v4 turn failed")
+            await status.edit(content=f"⚠️ {e}")
+            return
+        body = "\n".join(lines) or "（引擎沒有輸出——換個說法試試）"
+        await status.edit(content=_clip(body))
+        if narration:
+            await message.channel.send("📖 " + _clip(narration))
+
     async def on_message(self, message: discord.Message):
         if message.author.bot or not self.user:
             return
         content = message.content.strip()
         if not content:
             return  # empty in guilds when message content intent is off
+        # v4 playground channel: engine-driven flow (v3 everywhere else)
+        v4ch = (os.environ.get("V4_CHANNEL_ID") or "").strip()
+        if v4ch and str(message.channel.id) == v4ch:
+            await self._v4_message(message)
+            return
         cid = str(message.channel.id)
         mentioned = self.user in message.mentions
         for m in message.mentions:
