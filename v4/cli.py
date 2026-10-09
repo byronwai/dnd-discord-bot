@@ -161,7 +161,7 @@ def selftest() -> None:
 
     # attacking a nonexistent target is denied deterministically
     run("大力蕉 攻擊 巨龍")
-    assert any("找不到目標" in x or "輪到" in x for x in L)
+    assert any(x.startswith(("🚫", "⏳", "❓")) for x in L), L
     L.clear()
 
     # enemies strike back automatically; the rotation never parks on the

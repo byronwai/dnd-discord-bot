@@ -39,6 +39,12 @@ class Digestor:
             '範例:「我們去酒館吧」→ {"action":"move","actor":"",'
             '"target":"","item":"","spell":"","destination":"酒館",'
             '"utterance":"","confidence":0.9}\n'
+            "規則：若玩家提出「自創的花招或新方法」（不符標準動作、但故事上"
+            "合理可行，例如用魚叉勾住桅杆盪過去、把火把丟進水裡製造蒸汽），"
+            '輸出 {"action":"creative","utterance":"方法摘要",'
+            '"ability":"建議屬性(STR/DEX/CON/INT/WIS/CHA)","confidence":把握值}。\n'
+            "若玩家「無中生有掏出沒有的物品」（例如突然拿出火箭筒），照常輸出 "
+            "use+item——引擎會拒絕並吐槽。\n"
             f'玩家輸入:「{text}」→')
         try:
             async with httpx.AsyncClient(timeout=60) as c:

@@ -74,7 +74,7 @@ def validate(g: Game, it: Intent) -> str | None:
                     f"目前通道：{'、'.join(here.exits.values()) or '無'}")
     if it.action in ("use", "give") and actor:
         if not any(s[0] == it.item for s in g.inventory.get(actor, [])):
-            return f"{actor} 沒有「{it.item}」"
+            return f"SLOT:item:{it.item}"  # fabrication -> snark + deny
     if it.action == "attack":
         foe, tgt_char = resolve_target(g, it.target)
         if foe is None and tgt_char is None:
@@ -199,6 +199,18 @@ def resolve(g: Game, it: Intent) -> ResolveResult:
     """The one entry point: validate, mutate, ledger, render."""
     reason = validate(g, it)
     if reason:
+        # item-from-nowhere: deny with a snark (human-DM 吐槽) — nothing
+        # enters the world from thin air, but the refusal gets to be fun
+        if reason.startswith("SLOT:item:"):
+            item = reason.split("SLOT:item:", 1)[1]
+            actor = it.actor or next(iter(g.party))
+            from .templates import render_hint
+            g.ledger.add(actor, "deny", f"{actor} 沒有「{item}」（無中生有）",
+                         reason=f"沒有「{item}」", item=item, snark=True)
+            return ResolveResult(
+                [f"🚫 {actor} 沒有「{item}」",
+                 "🎭 " + render_hint(g.ledger.entries[-1], g)],
+                accepted=False)
         g.ledger.add(it.actor or "?", "deny", f"拒絕：{reason}", reason=reason)
         return ResolveResult([f"🚫 {reason}"], accepted=False)
     g.ledger.next_turn()
@@ -307,6 +319,22 @@ def resolve(g: Game, it: Intent) -> ResolveResult:
                 lines.append(f"🌑 {name}：倒地中，休息無效（需救治）")
         g.ledger.add(actor, "rest", f"隊伍{'長' if kind=='long' else '短'}休")
         return ResolveResult(lines)
+
+    if it.action == "creative":
+        # human-DM ruling: a plausible improvised method gets a real ability
+        # check; success writes a fact the narrator dramatizes, failure gets
+        # a light 吐槽. Never grants items/damage by itself — mechanical
+        # effects still go through canonical actions.
+        ability = (it.ability or "DEX").upper()
+        if ability not in ("STR", "DEX", "CON", "INT", "WIS", "CHA"):
+            ability = "DEX"
+        dc = int(it.args.get("dc", 12))
+        ok, line = ability_check(g, actor, ability, dc)
+        g.ledger.add(actor, "creative",
+                     f"{actor} 的花招（{it.utterance[:60]}）——"
+                     + ("成功" if ok else "失敗"),
+                     utterance=it.utterance[:120], ok=ok)
+        return ResolveResult([line])
 
     if it.action == "cast":
         if not g.spend_slot(actor, 1):

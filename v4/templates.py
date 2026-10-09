@@ -78,6 +78,29 @@ def render_hint(entry, game=None) -> str:
             return "塵埃落定，戰鬥結束了。"
         return "殺聲乍起，戰鬥爆發！"
 
+    if kind == "deny" and d.get("snark"):
+        item = d.get("item", "那個東西")
+        return _pick([
+            f"{actor} 在背包裡翻了半天——「{item}」？這裡從來沒有這種東西。"
+            f"眾人一臉茫然地看著 {actor}。",
+            f"{actor} 神氣地伸手一掏……掏了個空。「{item}」大概存在於"
+            "某個平行宇宙的背包裡。",
+            f"全場安靜了三秒。{actor}，你要不要先看看自己有什麼？"
+            f"（提示：不是{item}。）",
+        ], actor + str(item))
+
+    if kind == "creative":
+        u = d.get("utterance", "大膽的嘗試")
+        if d.get("ok"):
+            return _pick([
+                f"{actor} 靈機一動——{u}——居然真的奏效了！",
+                f"沒人想到這一招，但{actor}的{u}漂亮地成功了。"],
+                actor + u)
+        return _pick([
+            f"{actor} 的{u}……創意十足，執行可惜了點。",
+            f"{u}——這主意不錯，但{actor}的手不答應。"],
+            actor + u)
+
     if kind == "cast":
         return f"{actor} 低聲詠唱，魔力在指尖凝聚。"
 

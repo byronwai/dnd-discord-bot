@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 # canonical action vocabulary the engine understands
 ACTIONS = ("attack", "move", "use", "cast", "talk", "search",
-           "rest", "give", "check", "pass", "meta")
+           "rest", "give", "check", "pass", "creative", "meta")
 
 _VERBS = {
     "attack": ("攻擊", "打", "attack", "hit"),
