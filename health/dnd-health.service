@@ -1,0 +1,17 @@
+[Unit]
+Description=D&D Party Health Board Discord bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=comfyui
+WorkingDirectory=/home/comfyui/dnd-health-bot
+EnvironmentFile=/home/comfyui/dnd-health-bot/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/comfyui/dnd-dm-bot/venv/bin/python health_board.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

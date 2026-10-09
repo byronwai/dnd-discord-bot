@@ -1,0 +1,5 @@
+__pycache__/
+*.tgz
+data/*.db
+keys/
+.env
