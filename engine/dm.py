@@ -788,11 +788,42 @@ class DMEngine:
 
     def events_before(self, platform: str, chat_id: str, msg_id: int,
                       limit: int = 30) -> list[str]:
-        """Event lines for turns older than msg_id (the raw-text window)."""
-        return [r[0] for r in self.db.execute(
+        """Event lines for turns older than msg_id (the raw-text window).
+        Compression v2: consecutive events are distilled into scene blocks —
+        one line per stretch of story, keeping the union of engine facts.
+        Single-event stretches pass through verbatim; nothing is lost from
+        the ledger (the events table itself is untouched)."""
+        rows = [r[0] for r in self.db.execute(
             "SELECT line FROM events WHERE platform=? AND chat_id=? "
             "AND msg_id < ? ORDER BY id DESC LIMIT ?",
-            (platform, chat_id, int(msg_id), limit)).fetchall()][::-1]
+            (platform, chat_id, int(msg_id), limit * 2)).fetchall()][::-1]
+        if not rows:
+            return []
+        blocks: list[list[str]] = [[]]
+        for line in rows:
+            boundary = ("場景：" in line or "COMBAT" in line
+                        or line.startswith("系統"))
+            if boundary and blocks[-1]:
+                blocks.append([])
+            blocks[-1].append(line)
+        out = []
+        for block in blocks:
+            if not block:
+                continue
+            if len(block) == 1:
+                out.append(block[0])
+                continue
+            facts: list[str] = []
+            for line in block:
+                parts = line.split("｜", 1)
+                for f in ((parts[1] if len(parts) > 1 else "").split("；")):
+                    f = f.strip()
+                    if f and f not in facts:
+                        facts.append(f)
+            head = block[0].split("｜")[0][:38]
+            out.append(f"▪ {head}…（{len(block)} 回合）｜"
+                       + "；".join(facts[:6]))
+        return out[-limit:]
 
     def touch_notes(self, platform: str, chat_id: str, text: str) -> None:
         """Recency walk: npc/lore nodes mentioned in recent text float to the
@@ -2019,10 +2050,10 @@ class DMEngine:
                 party=self.party_text(platform, chat_id) if s["party"] else "(no party yet)",
                 summary=s["summary"] or "(new adventure)")},
             {"role": "system", "content":
-                "Condense the ADVENTURE LOG plus the following transcript excerpt into an "
-                "updated ADVENTURE LOG of at most 250 words. Keep: character names and stats, "
-                "key NPCs, current location and objective, unresolved hooks, important items. "
-                "Plain prose, no dialogue quotes."},
+                "把既有冒險日誌與下列對話摘錄，壓縮成「節拍清單」：最多 8 條，"
+                "每條一行 ≤25 字，格式「場景／事件 → 結果（狀態變化）」。"
+                "必須保留：角色名與等級、關鍵 NPC、地點與目標、未解鉤子、"
+                "重要物品、HP 大變化。繁體中文，不要對話原文。"},
             {"role": "user", "content": tail},
         ]
         try:
