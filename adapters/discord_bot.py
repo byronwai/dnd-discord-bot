@@ -487,6 +487,12 @@ class DiscordBot(discord.Client):
         @app_commands.describe(text="你的行動——留空＝下拉挑選常用動作／物品／自訂")
         async def act_cmd(interaction: discord.Interaction, text: str = ""):
             cid = str(interaction.channel_id)
+            v4ch = (os.environ.get("V4_CHANNEL_ID") or "").strip()
+            if v4ch and cid == v4ch:
+                await _announce(interaction,
+                                f"acts: `{_clip(text, 200)}`")
+                await self._v4_command_turn(interaction, text)
+                return
             st = self.engine.combat_get("discord", cid)
             if not st or not st.get("order"):
                 await interaction.response.send_message(
@@ -1105,6 +1111,12 @@ class DiscordBot(discord.Client):
         @self.tree.command(name="say", description="Act in the story (freeform)")
         @app_commands.describe(text="What your character does or says")
         async def say_cmd(interaction: discord.Interaction, text: str):
+            v4ch = (os.environ.get("V4_CHANNEL_ID") or "").strip()
+            if v4ch and str(interaction.channel_id) == v4ch:
+                await _announce(interaction,
+                                f"says: `{_clip(text, 300)}`")
+                await self._v4_command_turn(interaction, text)
+                return
             echo = f"💬 **{interaction.user.display_name}:** {_clip(text, 1800)}"
             await self._dm_turn_interaction(interaction, interaction.user.display_name,
                                            text, echo_prefix=echo)
@@ -1310,28 +1322,37 @@ class DiscordBot(discord.Client):
         return self.v4
 
     async def _v4_message(self, message: discord.Message):
-        """Engine-driven v4 turn: digest → engine (instant) → narrate."""
-        svc = self._v4_service()
-        status = await message.channel.send("⚙️ 引擎處理中…")
+        """Plain text in the v4 channel = table talk: ledger it, stay quiet.
+        The DM is triggered explicitly — /say or /act."""
         try:
-            lines, narration = await self.v4.handle(
-                message.content, message.author.display_name)
+            self._v4_service().table_talk(message.content,
+                                          message.author.display_name)
+        except Exception:
+            log.exception("v4 table_talk failed")
+        try:
+            await message.add_reaction("💬")
+        except discord.HTTPException:
+            pass
+
+    async def _v4_command_turn(self, interaction: discord.Interaction,
+                               text: str):
+        """A slash command (/say, /act) explicitly addresses the DM:
+        digest → engine (instant) → narrate."""
+        await interaction.response.defer()
+        status = await interaction.channel.send("⚙️ 引擎處理中…")
+        try:
+            lines, narration = await self._v4_service().handle(
+                text, interaction.user.display_name)
         except Exception as e:
             log.exception("v4 turn failed")
             await status.edit(content=f"⚠️ {e}")
             return
+        await status.delete()
         body = "\n".join(lines)
         if body:
-            await status.edit(content=_clip(body))
-        else:
-            # table talk: quiet ack — no DM interjection
-            try:
-                await status.delete()
-                await message.add_reaction("💬")
-            except discord.HTTPException:
-                pass
+            await interaction.channel.send(_clip(body))
         if narration:
-            await message.channel.send("📖 " + _clip(narration))
+            await interaction.channel.send("📖 " + _clip(narration))
 
     async def on_message(self, message: discord.Message):
         if message.author.bot or not self.user:
