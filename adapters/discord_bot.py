@@ -582,16 +582,21 @@ class DiscordBot(discord.Client):
                     lines.append(f"⚔️ 輪到 **{cur['name']}**——用 `/combat`")
             if not lines:
                 lines.append(f"🔄 場景：{g.world.here.name}")
-                facts = [e.text for e in g.ledger.entries[-5:]]
-                brief = "；".join(f"{n} {e['hp_now']}/{e['hp_max']}HP"
-                                 for n, e in g.party.items())
-                narr = await v4svc.narrator.narrate(
-                    facts, g.world.here.name, brief,
-                    hints=[f"眾人在{g.world.here.name}。"
-                           f"{g.world.here.description}",
-                           "給玩家新的視角或鉤子。"])
-                if narr:
-                    lines.append("📖 " + narr)
+                if not g.party:
+                    lines.append("❓ 還沒有角色——先用 `/pc` 建立角色。")
+                else:
+                    facts = [e.text for e in g.ledger.entries[-5:]]
+                    brief = "；".join(
+                        f"{n} {e['hp_now']}/{e['hp_max']}HP"
+                        for n, e in g.party.items()
+                        if isinstance(e, dict))
+                    narr = await v4svc.narrator.narrate(
+                        facts, g.world.here.name, brief,
+                        hints=[f"眾人在{g.world.here.name}。"
+                               f"{g.world.here.description}",
+                               "給玩家新的視角或鉤子。"])
+                    if narr:
+                        lines.append("📖 " + narr)
             await interaction.followup.send(
                 "\n".join(lines)[:1900])
 
