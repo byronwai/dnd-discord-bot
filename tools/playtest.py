@@ -19,11 +19,11 @@ e.set_party(P, C, {
     "依思": {"occupation": "Warlock", "aliases": ["Elyse"],
             "stats": {"STR": 11, "DEX": 14, "CON": 16, "INT": 11, "WIS": 14,
                       "CHA": 17},
-            "hp_now": 9, "hp_max": 9, "owner": "GonJK", "xp": 0},
+            "hp_now": 9, "hp_max": 9, "owner": "TestPlayer1", "xp": 0},
     "大力蕉": {"occupation": "Druid", "aliases": ["Banana-Strong"],
               "stats": {"STR": 10, "DEX": 13, "CON": 16, "INT": 12, "WIS": 17,
                         "CHA": 9},
-              "hp_now": 11, "hp_max": 11, "owner": "Ewwwww", "xp": 0},
+              "hp_now": 11, "hp_max": 11, "owner": "TestPlayer2", "xp": 0},
 })
 OPENER = ("NEW ADVENTURE: a bramble-sealed crypt entrance in a misty marsh. "
           "Set the opening scene in 80-120 words, then ask the players what they do.")

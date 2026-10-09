@@ -1,9 +1,9 @@
 import sys
 
-sys.path.insert(0, "/home/byronwai/dnd-dm-bot")
+sys.path.insert(0, "<DATA_DIR>")
 from engine.dm import DMEngine
 
-e = DMEngine("http://127.0.0.1:8080", "dnd-dm", "/home/byronwai/dnd-dm-bot/data")
+e = DMEngine("http://127.0.0.1:8080", "dnd-dm", "<DATA_DIR>/data")
 P, C = "discord", "<CHANNEL_ID>"
 
 # remove rows whose char_name isn't a real character (heredoc-mangled tests)
