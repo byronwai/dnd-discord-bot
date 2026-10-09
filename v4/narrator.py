@@ -39,7 +39,7 @@ class Narrator:
                 r = await c.post(f"{self.url}/v1/chat/completions", json={
                     "model": self.model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.7, "max_tokens": 400})
+                    "temperature": 0.7, "max_tokens": 280})
                 r.raise_for_status()
                 text = (r.json()["choices"][0]["message"]["content"] or "").strip()
             return text
