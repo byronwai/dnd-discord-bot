@@ -489,8 +489,6 @@ class DiscordBot(discord.Client):
             cid = str(interaction.channel_id)
             v4ch = (os.environ.get("V4_CHANNEL_ID") or "").strip()
             if v4ch and cid == v4ch:
-                await _announce(interaction,
-                                f"acts: `{_clip(text, 200)}`")
                 await self._v4_command_turn(interaction, text)
                 return
             st = self.engine.combat_get("discord", cid)
@@ -895,8 +893,8 @@ class DiscordBot(discord.Client):
             cid = str(interaction.channel_id)
             v4ch = (os.environ.get("V4_CHANNEL_ID") or "").strip()
             if v4ch and cid == v4ch:
-                await _announce(interaction, "runs `/continue`")
                 # v4: check for stuck state, then re-narrate the scene
+                # (announce skipped — the v4 output IS the response)
                 svc = self._v4_service()
                 g = svc.game
                 lines = []
@@ -926,7 +924,8 @@ class DiscordBot(discord.Client):
                                "給玩家一個新的視角或鉤子，推進故事。"])
                     if narr:
                         lines.append("📖 " + narr)
-                await interaction.followup.send("\n".join(lines)[:1900])
+                await interaction.response.send_message(
+                    "\n".join(lines)[:1900])
                 return
             if self.engine.turn_in_flight("discord", cid):
                 await interaction.response.send_message(
@@ -1148,8 +1147,6 @@ class DiscordBot(discord.Client):
         async def say_cmd(interaction: discord.Interaction, text: str):
             v4ch = (os.environ.get("V4_CHANNEL_ID") or "").strip()
             if v4ch and str(interaction.channel_id) == v4ch:
-                await _announce(interaction,
-                                f"says: `{_clip(text, 300)}`")
                 await self._v4_command_turn(interaction, text)
                 return
             echo = f"💬 **{interaction.user.display_name}:** {_clip(text, 1800)}"
@@ -1373,8 +1370,9 @@ class DiscordBot(discord.Client):
                                text: str):
         """A slash command (/say, /act) explicitly addresses the DM:
         digest → engine (instant) → narrate."""
-        await interaction.response.defer()
-        status = await interaction.channel.send("⚙️ 引擎處理中…")
+        await interaction.response.defer(thinking=True)
+        status = await interaction.followup.send(
+            f"⚙️ <@{interaction.user.id}> 引擎處理中…")
         try:
             lines, narration = await self._v4_service().handle(
                 text, interaction.user.display_name)
@@ -1382,12 +1380,19 @@ class DiscordBot(discord.Client):
             log.exception("v4 turn failed")
             await status.edit(content=f"⚠️ {e}")
             return
-        await status.delete()
+        try:
+            await status.delete()
+        except discord.HTTPException:
+            pass
         body = "\n".join(lines)
         if body:
-            await interaction.channel.send(_clip(body))
+            await interaction.followup.send(_clip(body))
+        elif not narration:
+            await interaction.followup.send(
+                f"💬 <@{interaction.user.id}> 已收到（桌邊對話——用 `/say` "
+                "對 DM 說話）")
         if narration:
-            await interaction.channel.send("📖 " + _clip(narration))
+            await interaction.followup.send("📖 " + _clip(narration))
 
     async def on_message(self, message: discord.Message):
         if message.author.bot or not self.user:
