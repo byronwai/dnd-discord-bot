@@ -161,7 +161,10 @@ class V4Service:
                 it.actor = next(
                     (n for n, v in g.party.items()
                      if str(v.get("owner_id", "")) == str(user_id)),
-                    next(iter(g.party)))
+                    next(iter(g.party), None))
+                if it.actor is None:
+                    return (["❓ 還沒有角色——先用 `/pc name:名字 "
+                             "occupation:職業` 建立角色。"], "")
             if it.actor and it.actor in g.party:
                 oid = str(g.party[it.actor].get("owner_id", ""))
                 if oid and oid != str(user_id):
