@@ -35,7 +35,7 @@ log = logging.getLogger("dnd-health")
 
 # the main bot's engine provides the shared (pure) move tables — /moves is
 # fully deterministic: no LLM, one read-only DB query
-DM_BOT_HOME = os.environ.get("DM_BOT_HOME", "/home/comfyui/dnd-dm-bot")
+DM_BOT_HOME = os.environ.get("DM_BOT_HOME", "/home/<USER>/dnd-dm-bot")
 
 MARKER = "🩸 **隊伍健康看板 / Party Health Board**"
 
@@ -98,7 +98,7 @@ DM 每回合以繁體中文敘述 80–180 字，結尾給你鉤子或建議選�
 祝冒險愉快！有問題隨時 `/help` 🎲""",
 ]
 DIFFICULTY_ZH = {"easy": "新手", "normal": "標準", "hard": "困難"}
-CHAT_WHERE = "platform = 'discord' AND chat_id = '1557388849959674006'"
+CHAT_WHERE = "platform = 'discord' AND chat_id = '<CHANNEL_ID>'"
 SESSION_SQL = ("SELECT party, scene, difficulty, combat, pending_check "
                "FROM sessions WHERE " + CHAT_WHERE)
 HEARTBEAT_SQL = "SELECT MAX(id), MAX(ts) FROM messages WHERE " + CHAT_WHERE
@@ -632,7 +632,7 @@ def main() -> int:
     except ValueError:
         log.error("CHANNEL_ID must be an integer")
         return 2
-    db_path = os.environ.get("DB_PATH", "/home/comfyui/dnd-dm-bot/data/campaign.db")
+    db_path = os.environ.get("DB_PATH", "/home/<USER>/dnd-dm-bot/data/campaign.db")
     bot = HealthBoardBot(channel_id, db_path)
     bot.run(token, log_handler=None)  # logging already goes to stdout/journald
     return 0

@@ -11,9 +11,9 @@ import sqlite3
 import sys
 import time
 
-LIVE = "/home/comfyui/dnd-dm-bot/data/campaign.db"
+LIVE = "/home/<USER>/dnd-dm-bot/data/campaign.db"
 PI = "/tmp/pi_campaign.db"
-DISCORD_CID = "1557388849959674006"
+DISCORD_CID = "<CHANNEL_ID>"
 TELEGRAM_CID = "-5521072617"
 CODE = "BTWQS6"
 

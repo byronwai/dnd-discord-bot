@@ -3,7 +3,7 @@ import shutil
 import sys
 import time
 
-sys.path.insert(0, "/home/comfyui/dnd-dm-bot")
+sys.path.insert(0, "/home/<USER>/dnd-dm-bot")
 from engine.dm import DMEngine
 from engine.rules import RulesIndex
 from engine.status import build_status
@@ -11,7 +11,7 @@ from engine.status import build_status
 shutil.rmtree("/tmp/dnd-playtest", ignore_errors=True)
 P, C = "discord", "playtest-001"
 
-ri = RulesIndex("/home/comfyui/dnd-dm-bot/data/rules.db",
+ri = RulesIndex("/home/<USER>/dnd-dm-bot/data/rules.db",
                 "http://127.0.0.1:11434", "mxbai-embed-large")
 e = DMEngine("http://127.0.0.1:11434", "gemma3:27b-it-qat", "/tmp/dnd-playtest",
              max_history=40, max_tokens=700, rules_index=ri)

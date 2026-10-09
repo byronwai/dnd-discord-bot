@@ -5,11 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=comfyui
-WorkingDirectory=/home/comfyui/dnd-health-bot
-EnvironmentFile=/home/comfyui/dnd-health-bot/.env
+User=<USER>
+WorkingDirectory=/home/<USER>/dnd-health-bot
+EnvironmentFile=/home/<USER>/dnd-health-bot/.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/comfyui/dnd-dm-bot/venv/bin/python health_board.py
+ExecStart=/home/<USER>/dnd-dm-bot/venv/bin/python health_board.py
 Restart=on-failure
 RestartSec=10
 

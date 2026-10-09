@@ -3,14 +3,14 @@ import shutil
 import sys
 import time
 
-sys.path.insert(0, "/home/comfyui/dnd-dm-bot")
+sys.path.insert(0, "/home/<USER>/dnd-dm-bot")
 from engine.dm import DMEngine
 from engine.rules import RulesIndex
 
 shutil.rmtree("/tmp/dnd-35b-test", ignore_errors=True)
 P, C = "discord", "live-35b"
 
-ri = RulesIndex("/home/comfyui/dnd-dm-bot/data/rules.db",
+ri = RulesIndex("/home/<USER>/dnd-dm-bot/data/rules.db",
                 "http://127.0.0.1:11434", "mxbai-embed-large")
 e = DMEngine("http://127.0.0.1:11434", "qwen3.5:35b", "/tmp/dnd-35b-test",
              max_history=40, max_tokens=2000, rules_index=ri)
