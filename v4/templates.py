@@ -139,21 +139,30 @@ def scene_header(g) -> str:
 
 
 def suggested_actions(g, actor: str = "") -> list[str]:
-    """2-4 concrete next-step options, scene-aware."""
+    """3-5 concrete next-step options, scene-aware, story-driving."""
     s = g.world.here
     opts = []
+    # NPCs first (they're the story drivers)
     for n in s.npcs:
         knows = n.get("knows", [])
+        disp = n.get("disposition", "neutral")
         if knows:
             opts.append(f"向 **{n['name']}** 打聽（知道 {len(knows)} 件事）")
+        elif disp == "hostile":
+            opts.append(f"面對 **{n['name']}**（敵對）")
         else:
             opts.append(f"和 **{n['name']}** 交談")
+    # exits with context
     for sid, label in list(s.exits.items())[:2]:
-        opts.append(f"前往「{label}」")
+        dest = g.world.scenes.get(sid)
+        hint = f"（{dest.description[:20]}…）" if dest and dest.description else ""
+        opts.append(f"前往「{label}」{hint}")
+    # search
     if s.hidden_items:
-        opts.append("搜索這裡（有隱藏物品）")
+        opts.append("🔍 搜索這裡（有隱藏物品）")
     else:
-        opts.append("搜索這裡")
+        opts.append("🔍 搜索這裡")
+    # combat or rest
     if g.combat.active:
         cur = g.combat.current()
         if cur:
@@ -162,8 +171,10 @@ def suggested_actions(g, actor: str = "") -> list[str]:
         hurt = any(e.get("hp_now", 99) < e.get("hp_max", 1) // 2
                    for e in g.party.values() if isinstance(e, dict))
         if hurt:
-            opts.append("休息恢復（`/explore 我們休息`）")
-    return opts[:4]
+            opts.append("🌿 休息恢復（`/explore 我們休息`）")
+        # creative prompt
+        opts.append("✨ 嘗試創意行動（`/explore` 描述任何想法）")
+    return opts[:5]
 
 
 def render_turn_context(g, actor: str = "") -> str:
