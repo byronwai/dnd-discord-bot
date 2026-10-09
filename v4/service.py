@@ -99,14 +99,8 @@ class V4Service:
         return f"🎒 {char} 現在攜帶：{inv or '（空）'}"
 
     def table_talk(self, text: str, author: str = "") -> None:
-        """Plain channel chatter: ledger it for context, never wake the DM.
-        Deterministic — no LLM, no turn, no state change."""
-        t = (text or "").strip()
-        if not t:
-            return
-        g = self.game
-        g.ledger.add(author or "?", "table", f"桌邊：{t[:80]}")
-        self._save()
+        """Plain channel chatter: ignore completely. No ledger, no save."""
+        pass
 
     # ---------- one turn ----------
 
