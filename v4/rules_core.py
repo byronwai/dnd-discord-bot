@@ -195,7 +195,7 @@ def _enemy_turn(g: Game, foe) -> list[str]:
     return lines
 
 
-def resolve(g: Game, it: Intent) -> ResolveResult:
+def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
     """The one entry point: validate, mutate, ledger, render."""
     reason = validate(g, it)
     if reason:
@@ -229,14 +229,10 @@ def resolve(g: Game, it: Intent) -> ResolveResult:
     # combat rotation is engine-enforced: only the current hero may act
     if g.combat.active and it.action not in ("pass",):
         if cur is not None and not cur.get("npc") and actor != cur["name"]:
-            reason = f"現在輪到 {cur['name']}（戰鬥輪替）"
+            reason = f"現在輪到 {cur['name']}"
             g.ledger.add(actor, "deny", f"拒絕：{reason}", reason=reason)
             return ResolveResult(
-                [f"⏳ {reason}——請該角色行動，或等待"], accepted=False)
-        if cur is not None and cur.get("npc"):
-            reason = f"敵方回合（{cur['name']}）由引擎自動結算——稍候或 pass"
-            g.ledger.add(actor, "deny", f"拒絕：{reason}", reason=reason)
-            return ResolveResult([f"⏳ {reason}"], accepted=False)
+                [f"⏳ {reason}——請該角色行動"], accepted=False)
 
     if it.action == "attack":
         # risky action: engine confirms the parsed intent once
@@ -421,3 +417,39 @@ def _post_rotation(g: Game) -> None:
             g.advance()  # downed PC: their turn is skipped by the engine
             continue
         return
+
+
+def resolve(g: Game, it: Intent) -> ResolveResult:
+    """The one entry point. If it's an enemy's turn, auto-resolve ALL
+    consecutive NPC slots immediately (never make the player wait), then
+    dispatch the player's action with the enemy results prepended."""
+    if not g.combat.active or it.action == "pass":
+        return _resolve_inner(g, it)
+    cur = g.combat.current()
+    if cur is None or not cur.get("npc"):
+        return _resolve_inner(g, it)  # already a PC's turn
+    # enemy turn: resolve all NPC slots now
+    pre_lines = []
+    guard = 0
+    while g.combat.active and guard < 50:
+        guard += 1
+        cur = g.combat.current()
+        if cur is None or not cur.get("npc"):
+            break
+        foe = g.enemies.get(cur["name"])
+        if foe is None or foe.dead:
+            g.advance()
+            continue
+        for line in _enemy_turn(g, foe):
+            pre_lines.append(line)
+            g.ledger.add(foe.name, "auto", line)
+        if not any(g.alive(n) for n in g.party):
+            g.ledger.add("engine", "combat",
+                         "全隊倒地——戰鬥結束（敗北）")
+            g.end_combat()
+            return ResolveResult(pre_lines, accepted=True)
+        g.advance()
+    # rotation reached a PC (or combat ended) — dispatch the player action
+    r = _resolve_inner(g, it)
+    return ResolveResult(pre_lines + r.lines, accepted=r.accepted,
+                         confirm=r.confirm)
