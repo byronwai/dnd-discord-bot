@@ -125,6 +125,117 @@ class DiscordBot(discord.Client):
     def _register_commands(self):
         svc = self  # closure alias
 
+        # ---- /pc (character creation) ----
+
+        CLASS_KEYS = ["Barbarian", "Bard", "Cleric", "Druid", "Fighter",
+                      "Monk", "Paladin", "Ranger", "Rogue", "Sorcerer",
+                      "Warlock", "Wizard"]
+        CLASS_ZH = {"Barbarian": "野蠻人", "Bard": "吟遊詩人",
+                    "Cleric": "牧師", "Druid": "德魯伊", "Fighter": "戰士",
+                    "Monk": "武僧", "Paladin": "聖武士", "Ranger": "遊俠",
+                    "Rogue": "盜賊", "Sorcerer": "術士",
+                    "Warlock": "魔契師", "Wizard": "法師"}
+
+        @self.tree.command(name="pc",
+                           description="建立角色 / create character")
+        @app_commands.describe(
+            name="角色名",
+            occupation="職業（下拉選擇）",
+            remove="填 remove confirm 以刪除角色（僅限擁有者）")
+        @app_commands.choices(occupation=[
+            app_commands.Choice(name=f"{CLASS_ZH[c]} {c}", value=c)
+            for c in CLASS_KEYS])
+        async def pc_cmd(interaction: discord.Interaction, name: str,
+                         occupation: app_commands.Choice[str],
+                         remove: str = ""):
+            g = svc._v4_service(str(interaction.channel_id)).game
+            uid = str(interaction.user.id)
+            uname = interaction.user.display_name
+
+            # removal
+            if remove.strip().lower().startswith("remove"):
+                entry = g.party.get(name)
+                if not isinstance(entry, dict):
+                    await interaction.response.send_message(
+                        f"❓ 沒有角色「{name}」")
+                    return
+                if str(entry.get("owner_id", "")) != uid:
+                    await interaction.response.send_message(
+                        f"🚫 只有 {entry.get('owner', '?')} 可以刪除 {name}。")
+                    return
+                if remove.strip().lower() != "remove confirm":
+                    await interaction.response.send_message(
+                        f"⚠️ 確認刪除 {name}？填 `remove confirm`")
+                    return
+                g.party.pop(name, None)
+                g.inventory.pop(name, None)
+                g.ledger.add(name, "meta", f"{uname} 刪除了角色 {name}")
+                svc._v4_service(str(interaction.channel_id))._save()
+                await interaction.response.send_message(
+                    f"🗑️ 已刪除 {name}。")
+                return
+
+            # creation or update
+            if name in g.party:
+                await interaction.response.send_message(
+                    f"❓ 「{name}」已存在（擁有者：{g.party[name].get('owner', '?')}）")
+                return
+
+            occ = occupation.value if occupation else "Fighter"
+            # fair stats: server-side 4d6kh3 ×6, assigned by class priority
+            from engine.charlib import default_ac, slots_for
+            from engine.dice import roll_expr
+            PRIORITIES = {
+                "Barbarian": ["STR", "CON", "DEX", "WIS", "CHA", "INT"],
+                "Bard": ["CHA", "DEX", "CON", "WIS", "INT", "STR"],
+                "Cleric": ["WIS", "CON", "STR", "CHA", "DEX", "INT"],
+                "Druid": ["WIS", "CON", "DEX", "INT", "CHA", "STR"],
+                "Fighter": ["STR", "CON", "DEX", "WIS", "CHA", "INT"],
+                "Monk": ["DEX", "WIS", "CON", "STR", "CHA", "INT"],
+                "Paladin": ["STR", "CHA", "CON", "WIS", "DEX", "INT"],
+                "Ranger": ["DEX", "WIS", "CON", "STR", "INT", "CHA"],
+                "Rogue": ["DEX", "INT", "CON", "WIS", "CHA", "STR"],
+                "Sorcerer": ["CHA", "CON", "DEX", "WIS", "INT", "STR"],
+                "Warlock": ["CHA", "CON", "DEX", "WIS", "INT", "STR"],
+                "Wizard": ["INT", "CON", "DEX", "WIS", "CHA", "STR"],
+            }
+            prio = PRIORITIES.get(occ, ["STR", "DEX", "CON", "INT", "WIS", "CHA"])
+            rolls = sorted((roll_expr("4d6kh3")[0] for _ in range(6)),
+                           reverse=True)
+            stats = dict(zip(prio, rolls))
+            # HP = hit die + CON mod
+            HIT_DICE = {"Barbarian": 12, "Fighter": 10, "Paladin": 10,
+                        "Ranger": 10, "Bard": 8, "Cleric": 8, "Druid": 8,
+                        "Monk": 8, "Rogue": 8, "Warlock": 8,
+                        "Sorcerer": 6, "Wizard": 6}
+            die = HIT_DICE.get(occ, 8)
+            con_mod = (stats["CON"] - 10) // 2
+            hp = die + con_mod
+            ac = default_ac(occ, stats)
+            slots = {str(k): v for k, v in slots_for(occ, 1).items()}
+
+            g.party[name] = {
+                "occupation": occ, "stats": stats,
+                "hp_now": hp, "hp_max": hp, "level": 1, "xp": 0,
+                "owner": uname, "owner_id": uid,
+                "ac": ac, "slots": slots, "hd_used": 0,
+            }
+            g.inventory.setdefault(name, [])
+            g.ledger.add(name, "meta",
+                         f"{uname} 建立了角色 {name}（{occ}）")
+            svc._v4_service(str(interaction.channel_id))._save()
+
+            stat_txt = " ".join(f"{k} {stats[k]}"
+                                for k in ["STR", "DEX", "CON", "INT", "WIS", "CHA"])
+            slot_txt = (" · 法術格 " + " ".join(f"L{k}×{v}"
+                        for k, v in slots.items())) if slots else ""
+            await interaction.response.send_message(
+                f"🧙 **{name}** — {CLASS_ZH.get(occ, occ)} Lv1 "
+                f"(玩家：{uname})\n"
+                f"🛡 AC {ac} · ❤️ {hp}/{hp}{slot_txt}\n"
+                f"📊 {stat_txt}\n"
+                f"🎲 屬性由系統擲骰（4d6 取高 3）")
+
         # ---- autocomplete helpers ----
 
         async def combat_target_ac(interaction, current: str):
