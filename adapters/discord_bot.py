@@ -306,6 +306,71 @@ class DiscordBot(discord.Client):
                 text = f"{char} 觀察"
             await _v4_turn(interaction, text, structured=True)
 
+        # ---- /inventory ----
+
+        @self.tree.command(name="inventory",
+                           description="物品欄與招式一覽 / inventory & moves")
+        @app_commands.describe(character="角色（留空＝自己）")
+        @app_commands.autocomplete(character=any_char_ac)
+        async def inventory_cmd(interaction: discord.Interaction,
+                                character: str = ""):
+            g = svc._v4_service().game
+            # default to the caller's character
+            char = character.strip()
+            if not char:
+                char = next((n for n, v in g.party.items()
+                             if str(v.get("owner_id", ""))
+                             == str(interaction.user.id)), "")
+            if not char or char not in g.party:
+                await interaction.response.send_message(
+                    "❓ 請指定角色（用 character 參數挑選）。")
+                return
+            e = g.party[char]
+            lines = [f"🎒 **{char}** — {e.get('occupation', '?')} "
+                     f"Lv{e.get('level', 1)} "
+                     f"HP {e['hp_now']}/{e['hp_max']}", ""]
+            # inventory
+            inv = g.inventory.get(char, [])
+            if inv:
+                lines.append("**物品 / Items**")
+                for name, qty in inv:
+                    lines.append(f"  🎒 {name}" + (f" ×{qty}" if qty > 1 else ""))
+            else:
+                lines.append("**物品 / Items**：（空）")
+            # spell slots
+            slots = e.get("slots") or {}
+            if slots:
+                lines.append("")
+                lines.append("**法術格 / Spell Slots**")
+                lines.append("  " + " · ".join(
+                    f"L{k} {v}" for k, v in slots.items()))
+            # moves
+            from engine.dm import compute_attack_moves, \
+                DMEngine
+            inv_tuples = [("item", n, q) for n, q in inv]
+            mx = g.max_slot(char)
+            moves = compute_attack_moves(
+                e.get("occupation", ""), int(e.get("level", 1)),
+                inv_tuples, mx)
+            all_moves = compute_attack_moves(
+                e.get("occupation", ""), int(e.get("level", 1)),
+                inv_tuples, 99)
+            lines.append("")
+            lines.append("**招式 / Moves**")
+            for m in all_moves:
+                req = DMEngine.MOVE_SPELL_LEVEL.get(m["name"], 0)
+                aoe = "（範圍）" if m["aoe"] else ""
+                if m in moves:
+                    cost = f"（耗 {req} 環法術格）" if req else ""
+                    src = "（裝備）" if m.get("improvised") else ""
+                    lines.append(f"  ⚔️ {m['name']} {m['ability']} "
+                                 f"{m['dmg']}{aoe}{cost}{src}")
+                else:
+                    lines.append(f"  🔒 {m['name']} {m['ability']} "
+                                 f"{m['dmg']}{aoe} — 需 {req} 環（未解鎖）")
+            await interaction.response.send_message(
+                "\n".join(lines)[:1900])
+
         # ---- /roll ----
 
         @self.tree.command(name="roll", description="擲骰 / dice roll")
