@@ -312,7 +312,7 @@ message in English or vice versa."""
 SYSTEM_PROMPT_ZH = """你是一場以聊天進行的《龍與地下城》5e桌上角色扮演遊戲的地下城主（DM）。
 
 你的風格：
-- 生動但精簡的敘述：每回合 80 至 180 字。用感官細節營造氣氛，保持節奏。
+- 生動但精簡的敘述：每回合 80 至 150 字（系統會截斷更長的輸出——在字數內自然收尾）。用感官細節營造氣氛，保持節奏。
 - 用鮮明的聲音扮演所有 NPC。
 - 角色所有權：每位玩家只能控制派對表中所有者為自己的角色。絕不敘述、決定或描述
   其他玩家的角色的行動、台詞或想法。唯一例外：該角色的所有者已在本團中明確聲明
@@ -447,6 +447,8 @@ class DMEngine:
         self.model = model
         self.max_history = max_history
         self.max_tokens = max_tokens
+        # narration hard cap: latency ∝ generated tokens; ~150 字 ceiling
+        self.narr_tokens = max(120, int(os.environ.get("DM_NARR_TOKENS", "400")))
         self.rules_index = rules_index  # engine.rules.RulesIndex or None
         # context graph: how many recent messages ride verbatim; older turns
         # enter the prompt as one-line event records (engine/events table)
@@ -1648,12 +1650,13 @@ class DMEngine:
                     for m in msgs]
         return msgs
 
-    async def _llm_stream(self, messages: list[dict], on_delta=None) -> str:
+    async def _llm_stream(self, messages: list[dict], on_delta=None,
+                          max_tokens: int | None = None) -> str:
         """Call llama.cpp /v1/chat/completions with streaming; returns full text."""
         body = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": self.max_tokens,
+            "max_tokens": max_tokens or self.max_tokens,
             "temperature": 0.72,
             "top_p": 0.9,
             "repeat_penalty": 1.1,
@@ -1858,10 +1861,15 @@ class DMEngine:
                              "damage/healing/loot AFTER the verdict): "
                              + self._map_text(verdict_line, mapping)})
             try:
-                reply = await self._llm_stream(msgs, on_delta)
+                reply = await self._llm_stream(msgs, on_delta,
+                                                max_tokens=self.narr_tokens)
             except Exception as e:
                 raise RuntimeError(f"LLM error: {e}") from e
             reply = _THINK_RE.sub("", reply)
+            # mid-sentence cut from the cap: close it gracefully
+            if reply and len(reply) > 60 and not reply.rstrip().endswith(
+                    ("。", "！", "？", "」", "…", "）", ")", ".", "!", "?")):
+                reply = reply.rstrip() + "……"
             # the DM must never self-roll: scrub fabricated dice claims
             reply = _FAKE_DICE_RE.sub("", reply)
             reply = _FAKE_DICE_LINE_RE.sub("", reply)
