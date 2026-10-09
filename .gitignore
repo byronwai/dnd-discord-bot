@@ -6,3 +6,8 @@ data/*.json
 keys/
 .env
 .zcodeignore
+HANDOFF.md
+MEMORY.md
+.zcodeignore
+deploy/
+legacy/*.service
