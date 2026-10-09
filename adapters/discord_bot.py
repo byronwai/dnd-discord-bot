@@ -1065,6 +1065,12 @@ class DiscordBot(discord.Client):
         # messages are invisible to the channel otherwise); never LLM-edited.
         # user_id: whose action this is (an /act may act for the character's
         # owner under admin takeover); defaults to the invoking user.
+        v4ch = (os.environ.get("V4_CHANNEL_ID") or "").strip()
+        if v4ch and str(interaction.channel_id) == v4ch:
+            await interaction.response.send_message(
+                "🧪 此頻道已由 **v4 引擎**接管——直接打字就行"
+                "（v3 回合指令在此頻道停用）。", ephemeral=True)
+            return
         if echo_prefix is not None:
             await interaction.response.send_message(echo_prefix)
         elif not interaction.response.is_done():
@@ -1110,6 +1116,11 @@ class DiscordBot(discord.Client):
                                system_suffix: str | None = None,
                                user_id: str = "",
                                combat_turn: bool = False):
+        v4ch = (os.environ.get("V4_CHANNEL_ID") or "").strip()
+        if v4ch and str(channel.id) == v4ch:
+            await channel.send("🧪 此頻道已由 **v4 引擎**接管——直接打字就行"
+                               "（v3 回合指令在此頻道停用）。")
+            return
         status = await channel.send("🎲 DM 正在思考… The DM ponders…")
         last_edit = [0.0]
 
