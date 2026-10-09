@@ -77,7 +77,7 @@ class DiscordBot(discord.Client):
         super().__init__(intents=intents)
         self.engine = engine
         self.tree = app_commands.CommandTree(self)
-        self.v4 = None
+        self._v4_games: dict[str, object] = {}  # channel_id → V4Service
         self._register_commands()
 
     async def setup_hook(self):
@@ -92,23 +92,31 @@ class DiscordBot(discord.Client):
             except Exception as e:
                 log.warning("sync failed for %s: %s", g.id, e)
 
-    def _v4_service(self):
-        if self.v4 is None:
+    def _v4_channels(self) -> set:
+        """All channel IDs routed to the v4 engine (comma-separated env)."""
+        raw = (os.environ.get("V4_CHANNEL_IDS")
+               or os.environ.get("V4_CHANNEL_ID")  # legacy single-channel
+               or "").strip()
+        return {c.strip() for c in raw.split(",") if c.strip()}
+
+    def _v4_service(self, channel_id: str = ""):
+        """Per-channel V4Service — each table gets its own game state."""
+        cid = str(channel_id) if channel_id else "default"
+        if cid not in self._v4_games:
             from v4.service import V4Service
-            self.v4 = V4Service(
-                os.environ.get("DATA_DIR", "data"),
+            data_dir = os.environ.get("DATA_DIR", "data")
+            self._v4_games[cid] = V4Service(
+                data_dir,
                 os.environ.get("LLM_URL", "http://127.0.0.1:11434"),
                 os.environ.get("V4_DIGEST_MODEL", "gemma3:12b-it-qat"),
-                os.environ.get("V4_NARR_MODEL", "gemma3:27b-it-qat"))
-        return self.v4
+                os.environ.get("V4_NARR_MODEL", "gemma3:27b-it-qat"),
+                channel_id=cid)
+        return self._v4_games[cid]
 
     def _in_v4(self, interaction_or_channel) -> bool:
-        v4ch = (os.environ.get("V4_CHANNEL_ID") or "").strip()
-        if not v4ch:
-            return False
         cid = str(getattr(interaction_or_channel, "channel_id", None)
                   or getattr(interaction_or_channel, "id", ""))
-        return cid == v4ch
+        return cid in self._v4_channels()
 
     # ------------------------------------------------------------------
     #  command registration
@@ -121,7 +129,7 @@ class DiscordBot(discord.Client):
 
         async def combat_target_ac(interaction, current: str):
             cid = str(interaction.channel_id)
-            g = svc._v4_service().game
+            g = svc._v4_service(str(interaction.channel_id)).game
             entries = []
             for name, foe in g.enemies.items():
                 if foe.dead:
@@ -138,7 +146,7 @@ class DiscordBot(discord.Client):
 
         async def combat_move_ac(interaction, current: str):
             cid = str(interaction.channel_id)
-            g = svc._v4_service().game
+            g = svc._v4_service(str(interaction.channel_id)).game
             char = _filled_param(interaction, "character")
             if not char:
                 char = next((n for n, v in g.party.items()
@@ -165,7 +173,7 @@ class DiscordBot(discord.Client):
             return out[:25]
 
         async def any_char_ac(interaction, current: str):
-            g = svc._v4_service().game
+            g = svc._v4_service(str(interaction.channel_id)).game
             q = (current or "").strip().lower()
             out = []
             for n, v in g.party.items():
@@ -176,7 +184,7 @@ class DiscordBot(discord.Client):
             return out[:25]
 
         async def item_ac(interaction, current: str):
-            g = svc._v4_service().game
+            g = svc._v4_service(str(interaction.channel_id)).game
             q = (current or "").strip().lower()
             names = []
             for stacks in g.inventory.values():
@@ -209,7 +217,7 @@ class DiscordBot(discord.Client):
         @self.tree.command(name="confirm",
                            description="確認待決行動 / confirm pending action")
         async def confirm_cmd(interaction: discord.Interaction):
-            v4svc = svc._v4_service()
+            v4svc = svc._v4_service(str(interaction.channel_id))
             if v4svc.pending is None:
                 await interaction.response.send_message(
                     "（沒有待確認的行動）")
@@ -277,7 +285,7 @@ class DiscordBot(discord.Client):
         async def combat_cmd(interaction: discord.Interaction,
                              action: app_commands.Choice[str],
                              target: str = "", move: str = ""):
-            g = svc._v4_service().game
+            g = svc._v4_service(str(interaction.channel_id)).game
             if not g.combat.active and action.value not in ("observe",):
                 await interaction.response.send_message(
                     "⚔️ 目前沒有戰鬥——用 `/explore` 行動。")
@@ -314,7 +322,7 @@ class DiscordBot(discord.Client):
         @app_commands.autocomplete(character=any_char_ac)
         async def inventory_cmd(interaction: discord.Interaction,
                                 character: str = ""):
-            g = svc._v4_service().game
+            g = svc._v4_service(str(interaction.channel_id)).game
             # default to the caller's character
             char = character.strip()
             if not char:
@@ -394,7 +402,7 @@ class DiscordBot(discord.Client):
         @app_commands.autocomplete(item=item_ac)
         async def give_cmd(interaction: discord.Interaction,
                            item: str, to: str = ""):
-            g = svc._v4_service().game
+            g = svc._v4_service(str(interaction.channel_id)).game
             giver = next((n for n, v in g.party.items()
                           if str(v.get("owner_id", ""))
                           == str(interaction.user.id)), "")
@@ -419,13 +427,13 @@ class DiscordBot(discord.Client):
                 g.ledger.add(giver, "item", f"{giver} 丟棄了 {item}")
                 await interaction.response.send_message(
                     f"🎒 {giver} 丟棄了 {item}")
-            svc._v4_service()._save()
+            svc._v4_service(str(interaction.channel_id))._save()
 
         # ---- /status ----
 
         @self.tree.command(name="status", description="隊伍／場景狀態 / game status")
         async def status_cmd(interaction: discord.Interaction):
-            g = svc._v4_service().game
+            g = svc._v4_service(str(interaction.channel_id)).game
             lines = [f"📍 場景：{g.world.here.name}"]
             if g.combat.active:
                 cur = g.combat.current()
@@ -448,7 +456,7 @@ class DiscordBot(discord.Client):
         @self.tree.command(name="continue",
                            description="遊戲卡住時推進 / nudge if stalled")
         async def continue_cmd(interaction: discord.Interaction):
-            v4svc = svc._v4_service()
+            v4svc = svc._v4_service(str(interaction.channel_id))
             g = v4svc.game
             lines = []
             if v4svc.pending is not None:
@@ -563,7 +571,7 @@ class DiscordBot(discord.Client):
             if not interaction.user.guild_permissions.manage_guild:
                 await interaction.response.send_message("🚫 僅管理員。")
                 return
-            out = svc._v4_service().admin_give(character, item, qty)
+            out = svc._v4_service(str(interaction.channel_id)).admin_give(character, item, qty)
             await interaction.response.send_message(out)
 
         # ------------------------------------------------------------------
@@ -581,7 +589,7 @@ class DiscordBot(discord.Client):
                 f"{_clip(text, 200)}")
             await interaction.response.defer(thinking=True)
             try:
-                lines, narration = await svc._v4_service().handle(
+                lines, narration = await svc._v4_service(str(interaction.channel_id)).handle(
                     text, interaction.user.display_name,
                     user_id=str(interaction.user.id),
                     structured=structured)
@@ -622,7 +630,7 @@ class DiscordBot(discord.Client):
         if v4ch and str(message.channel.id) == v4ch:
             # plain text = table talk: ledger silently, no reaction, no reply
             try:
-                self._v4_service().table_talk(
+                self._v4_service(str(message.channel.id)).table_talk(
                     content, message.author.display_name)
             except Exception:
                 pass
@@ -631,7 +639,7 @@ class DiscordBot(discord.Client):
 
     async def _v4_admin_run(self, interaction, character, text):
         """Execute admin-driven v4 turn; returns list of message strings."""
-        svc = self._v4_service()
+        svc = self._v4_service(str(interaction.channel_id))
         g = svc.game
         if character not in g.party:
             return [f"❓ 沒有角色「{character}」"]

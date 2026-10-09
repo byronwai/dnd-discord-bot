@@ -22,12 +22,16 @@ from .world import Enemy, Scene, World
 class V4Service:
     def __init__(self, data_dir: str, llm_url: str,
                  digest_model: str = "gemma3:12b-it-qat",
-                 narr_model: str = "gemma3:27b-it-qat"):
-        self.path = os.path.join(data_dir, "v4_state.json")
+                 narr_model: str = "gemma3:27b-it-qat",
+                 channel_id: str = ""):
+        # per-channel state: each Discord table gets its own game
+        fname = f"v4_state_{channel_id}.json" if channel_id else "v4_state.json"
+        self.path = os.path.join(data_dir, fname)
+        self.channel_id = channel_id
         self.digestor = Digestor(llm_url, digest_model)
         self.narrator = Narrator(llm_url, narr_model)
         self.game: Game = self._load() or build_demo_game()
-        self.pending = None  # Intent awaiting the player's 確認
+        self.pending = None  # Intent awaiting the player's /confirm
         self._recent_narrations: list[str] = []  # v3: repetition guard
 
     # ---------- persistence ----------
