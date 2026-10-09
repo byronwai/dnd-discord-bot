@@ -45,6 +45,11 @@ class Digestor:
             '"ability":"建議屬性(STR/DEX/CON/INT/WIS/CHA)","confidence":把握值}。\n'
             "若玩家「無中生有掏出沒有的物品」（例如突然拿出火箭筒），照常輸出 "
             "use+item——引擎會拒絕並吐槽。\n"
+            "觀眾判定：只有當訊息是「對 DM 說的」（描述角色行動、與世界互動、"
+            "問 DM 問題）才當作遊戲動作。若訊息是「玩家之間的聊天／討論／玩笑」"
+            "（叫另一個玩家名字、現實話題、純建議或閒聊、策略討論而無實際行動），"
+            '輸出 {"action":"chat","utterance":"原文摘要"}。\n'
+            "拿不準時，偏向遊戲動作（玩家的行動不能被漏掉）。\n"
             f'玩家輸入:「{text}」→')
         try:
             async with httpx.AsyncClient(timeout=60) as c:

@@ -1320,8 +1320,16 @@ class DiscordBot(discord.Client):
             log.exception("v4 turn failed")
             await status.edit(content=f"⚠️ {e}")
             return
-        body = "\n".join(lines) or "（引擎沒有輸出——換個說法試試）"
-        await status.edit(content=_clip(body))
+        body = "\n".join(lines)
+        if body:
+            await status.edit(content=_clip(body))
+        else:
+            # table talk: quiet ack — no DM interjection
+            try:
+                await status.delete()
+                await message.add_reaction("💬")
+            except discord.HTTPException:
+                pass
         if narration:
             await message.channel.send("📖 " + _clip(narration))
 

@@ -213,6 +213,12 @@ def resolve(g: Game, it: Intent) -> ResolveResult:
                 accepted=False)
         g.ledger.add(it.actor or "?", "deny", f"拒絕：{reason}", reason=reason)
         return ResolveResult([f"🚫 {reason}"], accepted=False)
+    if it.action == "chat":
+        # player-to-player table talk: remembered for context (ledger +
+        # narrator), but the DM stays out of it — no reply, no turn spent
+        g.ledger.add(it.actor or "?", "table",
+                     f"桌邊：{(it.utterance or it.raw)[:80]}")
+        return ResolveResult([], accepted=True)
     g.ledger.next_turn()
     cur = g.combat.current() if g.combat.active else None
     if not it.actor and cur is not None and not cur.get("npc"):

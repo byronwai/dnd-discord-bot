@@ -116,12 +116,15 @@ class V4Service:
                 it = self.pending
                 it.args["confirmed"] = True
             self.pending = None  # anything else = changed their mind
-        if it is None:
+        if t.startswith(("((", "//")):  # explicit out-of-character
+            from .intent import Intent
+            it = Intent(action="chat", utterance=t.lstrip("(/ "), raw=t)
+        else:
             it = await self.digestor.digest(
-                t, list(g.party), g.world.here.name,
-                list(g.world.here.exits.values()),
-                known_targets=list(g.enemies) +
-                [n["name"] for n in g.world.here.npcs] + list(g.party))
+                    t, list(g.party), g.world.here.name,
+                    list(g.world.here.exits.values()),
+                    known_targets=list(g.enemies) +
+                    [n["name"] for n in g.world.here.npcs] + list(g.party))
         idx0 = len(g.ledger.entries)  # this turn's slice of the ledger
         r = resolve(g, it)
         if r.confirm is not None:
