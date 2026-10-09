@@ -826,6 +826,24 @@ class DiscordBot(discord.Client):
                 await interaction.followup.send(
                     result + "\n_(該角色目前沒有待決檢定——這顆骰不影響劇情)_")
 
+        @self.tree.command(name="continue",
+                           description="Nudge the DM if the game stalls / 遊戲卡住時推進劇情")
+        async def continue_cmd(interaction: discord.Interaction):
+            cid = str(interaction.channel_id)
+            if self.engine.turn_in_flight("discord", cid):
+                await interaction.response.send_message(
+                    "⏳ DM 仍在生成上一個回應——請再等一下；真的卡死時再按一次 /continue。")
+                return
+            await _announce(interaction, "runs `/continue`（遊戲停滯，推進劇情）")
+            await self._dm_turn_interaction(
+                interaction, "party", "（推進劇情）",
+                system_suffix=(
+                    "CONTINUE（玩家回報遊戲停滯）：檢查最近的玩家行動——"
+                    "若尚未回應，現在回應它；若已回應，推進新劇情（新的發現、"
+                    "NPC 反應、環境變化或新的選擇）。嚴禁重複任何先前的敘述內容。"
+                    "80-150 字，繁體中文。"),
+                user_id=str(interaction.user.id))
+
         @self.tree.command(name="v4-here",
                            description="(Admin) point the v4 engine playground at THIS channel / 綁定 v4 到此頻道")
         async def v4_here_cmd(interaction: discord.Interaction):

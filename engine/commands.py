@@ -130,6 +130,7 @@ Difficulty goes right after the setting: `/new blood moon castle (hard)` (Friend
 `/rest short|long` — spend hit dice or full recover / 短休（生命骰）或長休
 `/status` — game status: session, story so far, party, system health
 `/roll <expr>` — roll dice (`/roll 2d6+3`, `/roll adv`, `/roll 4d6kh3`); a d20 settles your pending check with the rolled die
+`/continue` — nudge the DM when the game stalls (never burns a turn)
 `/roll-admin <expr> <char>` — *(admin)* roll for any character (in-command list); a d20 result settles their pending check
 `/say-admin <text> <char>` — *(admin)* act as any character (in-command list)
 `/act-admin [text] <char>` — *(admin)* combat action as any character (empty text = canned actions/items picker)
@@ -170,6 +171,7 @@ DISCORD_ZH = """🎲 **D&D DM 機器人 — 指令說明**
 `/rest short|long` — 短休（花生命骰）／長休（全滿恢復）
 `/status` — 遊戲狀態：場次、劇情、隊伍、系統健康
 `/roll <骰式>` — 擲骰（`/roll 2d6+3`）；有待決檢定時，d20 骰值直接結算該判定（限該角色玩家）
+`/continue` — 遊戲卡住時推進劇情（DM 停滯／無回應時使用，不消耗回合）
 `/say-admin <文字> <角色>` — （管理員）以任意角色行動（角色在指令內清單挑選）
 `/act-admin [文字] <角色>` — （管理員）以任意角色戰鬥行動（留空＝下拉挑選常用動作／物品）
 `/attack-admin <角色> <目標> <招式>` — （管理員）以任意角色攻擊（指令內清單挑選，引擎全程結算）
