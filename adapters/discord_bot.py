@@ -206,6 +206,56 @@ class DiscordBot(discord.Client):
         async def explore_cmd(interaction: discord.Interaction, text: str):
             await _v4_turn(interaction, text)
 
+        @self.tree.command(name="confirm",
+                           description="確認待決行動 / confirm pending action")
+        async def confirm_cmd(interaction: discord.Interaction):
+            v4svc = svc._v4_service()
+            if v4svc.pending is None:
+                await interaction.response.send_message(
+                    "（沒有待確認的行動）")
+                return
+            p = v4svc.pending
+            v4svc.pending = None
+            p.args["confirmed"] = True
+            await interaction.response.defer(thinking=True)
+            from v4.rules_core import resolve as v4_resolve
+            r = v4_resolve(v4svc.game, p)
+            body = "\n".join(r.lines)
+            if body:
+                await interaction.followup.send(_clip(body))
+            # narrate
+            if r.accepted and r.lines:
+                from v4.templates import render_hint
+                from v4.guards import (make_placeholder_map, map_out,
+                                       map_in, make_restore_map,
+                                       scrub_narration, is_chinese)
+                g = v4svc.game
+                recent = [e for e in g.ledger.entries
+                          if e.turn == g.ledger.turn][-6:]
+                hints = [h for h in (render_hint(e, g) for e in recent) if h]
+                facts = [e.text for e in recent]
+                brief = "；".join(f"{n} {e['hp_now']}/{e['hp_max']}HP"
+                                 for n, e in g.party.items())
+                pmap = make_placeholder_map(list(g.party))
+                rmap = make_restore_map(list(g.party))
+                narr = await v4svc.narrator.narrate(
+                    [map_out(f, pmap) for f in facts],
+                    g.world.here.name, map_out(brief, pmap),
+                    hints=[map_out(h, pmap) for h in hints])
+                try:
+                    from opencc import OpenCC
+                    narr = OpenCC("s2t").convert(narr)
+                except ImportError:
+                    pass
+                narr, _ = scrub_narration(narr)
+                narr = map_in(narr, rmap)
+                if narr and is_chinese(narr):
+                    await interaction.followup.send("📖 " + _clip(narr))
+                elif hints:
+                    await interaction.followup.send(
+                        "📖 " + _clip(map_in("\n".join(hints), rmap)))
+            v4svc._save()
+
         # ---- /combat ----
 
         @self.tree.command(name="combat",

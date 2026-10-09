@@ -240,7 +240,7 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         if it.confidence < 0.7 and not it.args.get("confirmed"):
             return ResolveResult(
                 [f"❓ 我理解你要：**{actor} 攻擊 {it.target}**"
-                 "——回覆「確認」執行，或描述其他行動。"],
+                 "——用 `/confirm` 執行，或 `/explore` 描述其他行動。"],
                 confirm=it)
         r = _attack(g, actor, it.target, it.args.get("move", ""))
         _post_rotation(g)
