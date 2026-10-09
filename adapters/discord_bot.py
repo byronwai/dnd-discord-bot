@@ -44,7 +44,7 @@ HELP_TEXT = """🎲 **v4 引擎指令 / Commands**（11 個）
 `/help` — 本說明
 
 **管理員 / Admin**
-`/say-admin <text> <char>` — 以任意角色行動
+`/explore-admin <text> <char>` — 以任意角色行動
 `/combat-admin` — 以任意角色戰鬥
 `/roll-admin <expr> <char>` — 代擲
 `/give-admin <char> <item> [qty]` — 給物品
@@ -358,7 +358,7 @@ class DiscordBot(discord.Client):
         #  admin commands
         # =============================================================
 
-        @self.tree.command(name="say-admin",
+        @self.tree.command(name="explore-admin",
                            description="(Admin) 以任意角色行動 / act as any character")
         @app_commands.describe(text="行動內容", character="角色")
         @app_commands.autocomplete(character=any_char_ac)
