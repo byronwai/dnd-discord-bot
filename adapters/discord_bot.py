@@ -826,6 +826,26 @@ class DiscordBot(discord.Client):
                 await interaction.followup.send(
                     result + "\n_(該角色目前沒有待決檢定——這顆骰不影響劇情)_")
 
+        @self.tree.command(name="v4-here",
+                           description="(Admin) point the v4 engine playground at THIS channel / 綁定 v4 到此頻道")
+        async def v4_here_cmd(interaction: discord.Interaction):
+            if not interaction.user.guild_permissions.manage_guild:
+                await interaction.response.send_message(
+                    "🚫 僅伺服器管理員可使用 /v4-here。")
+                return
+            path = os.path.join(os.environ.get("DATA_DIR", "data"),
+                                "v4_channel.txt")
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(str(interaction.channel_id))
+            except OSError as e:
+                await interaction.response.send_message(f"⚠️ {e}")
+                return
+            await interaction.response.send_message(
+                f"🧪 **v4 playground 已改綁到此頻道**（{interaction.channel.mention}）。\n"
+                "在這裡說話＝引擎驅動回合（digest → engine → narrate）；"
+                "其他頻道不受影響。現有 v4 存檔跟著走。")
+
         @self.tree.command(name="attack",
                            description="Roll your attack / 攻擊骰（選招式，系統擲骰）")
         @app_commands.describe(
@@ -1239,8 +1259,17 @@ class DiscordBot(discord.Client):
         content = message.content.strip()
         if not content:
             return  # empty in guilds when message content intent is off
-        # v4 playground channel: engine-driven flow (v3 everywhere else)
+        # v4 playground channel: the runtime binding (v4_channel.txt,
+        # written by /v4-here) beats the V4_CHANNEL_ID env default
         v4ch = (os.environ.get("V4_CHANNEL_ID") or "").strip()
+        try:
+            with open(os.path.join(os.environ.get("DATA_DIR", "data"),
+                                   "v4_channel.txt"), encoding="utf-8") as f:
+                _bound = f.read().strip()
+            if _bound:
+                v4ch = _bound
+        except OSError:
+            pass
         if v4ch and str(message.channel.id) == v4ch:
             await self._v4_message(message)
             return
