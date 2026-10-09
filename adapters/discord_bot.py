@@ -567,6 +567,7 @@ class DiscordBot(discord.Client):
         @self.tree.command(name="continue",
                            description="遊戲卡住時推進 / nudge if stalled")
         async def continue_cmd(interaction: discord.Interaction):
+            await interaction.response.defer(thinking=True)
             v4svc = svc._v4_service(str(interaction.channel_id))
             g = v4svc.game
             lines = []
@@ -591,7 +592,7 @@ class DiscordBot(discord.Client):
                            "給玩家新的視角或鉤子。"])
                 if narr:
                     lines.append("📖 " + narr)
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "\n".join(lines)[:1900])
 
         # ---- /help ----
