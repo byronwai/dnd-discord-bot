@@ -54,8 +54,8 @@ async def build_status(engine, platform: str, chat_id: str) -> str:
                      f"DC {pending['dc']} — reply `骰`/`roll` to roll it")
 
     # DM notebook: named NPCs & established facts
-    npcs = engine.npc_list(platform, chat_id, limit=8)
-    lore = engine.lore_list(platform, chat_id, limit=8)
+    npcs = engine.npc_list(platform, chat_id, limit=12)
+    lore = engine.lore_list(platform, chat_id, limit=12)
     if npcs or lore:
         lines.append("")
         lines.append("📝 **DM 筆記 / DM Notes**")

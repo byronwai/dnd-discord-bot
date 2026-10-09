@@ -1601,8 +1601,8 @@ class DMEngine:
                        + (s.get("objective") or "-"))
         # DM notebook: named NPCs & established world facts from the DB —
         # recency-capped (mentions float nodes to the top via touch_notes)
-        npcs = self.npc_list(platform, chat_id, limit=8)
-        lore = self.lore_list(platform, chat_id, limit=8)
+        npcs = self.npc_list(platform, chat_id, limit=12)
+        lore = self.lore_list(platform, chat_id, limit=12)
         if npcs:
             system += ("\n\nDM 筆記——NPC 記錄（跨回合事實：名字、身分與狀態"
                        "必須與此一致；狀態改變時發 [[npc:...]] 更新）：\n"
@@ -1635,7 +1635,8 @@ class DMEngine:
         hist = _cleaned
         if hist:
             oldest_raw = hist[0].get("id") if hist[0].get("id") else 0
-            events = self.events_before(platform, chat_id, oldest_raw)
+            events = self.events_before(platform, chat_id, oldest_raw,
+                                        limit=40)
             if events:
                 msgs.append({"role": "system", "content":
                              "近期事件摘要（結構化事實，取代舊對話原文——劇情必須"
