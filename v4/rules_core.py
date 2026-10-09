@@ -418,8 +418,15 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         _post_rotation(g)
         return ResolveResult([f"⏭ {actor} 等待"])
 
-    return ResolveResult([f"🤔 引擎還不認得這個動作（{it.action}）"],
-                         accepted=False)
+    # unknown / meta / aspiration: don't reject — show context + options
+    # and let the narrator respond in-character to what the player said
+    g.ledger.add(actor, it.action or "meta",
+                 f"{actor}：{it.utterance or it.raw or it.action}")
+    from .templates import render_turn_context
+    ctx = render_turn_context(g, actor)
+    return ResolveResult(
+        [f"💬 {actor}：{it.utterance or it.raw or '?'}", "", ctx],
+        accepted=True)
 
 
 def _post_rotation(g: Game) -> None:
