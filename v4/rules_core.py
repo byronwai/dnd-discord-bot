@@ -92,14 +92,45 @@ def _render_check(name: str, ability: str, d20: int, mod: int, total: int,
 
 
 def ability_check(g: Game, actor: str, ability: str, dc: int,
-                  skill: str = "") -> tuple[bool, str]:
+                  skill: str = "",
+                  auto: bool = True) -> tuple[bool, str] | None:
+    """Roll a check. auto=True rolls immediately (combat/structured).
+    auto=False shows a pending check card and waits for /roll —
+    restoring v3's player-dice agency for /explore actions."""
     mod = total_mod(g.party[actor], ability, skill, "check")
+    if not auto:
+        need = max(1, dc - mod)
+        g._pending_check = {
+            "actor": actor, "ability": ability, "skill": skill,
+            "dc": dc, "mod": mod}
+        line = (f"🎯 {actor} {ability}"
+                + (f"（{skill}）" if skill else "")
+                + f" 檢定 vs DC {dc}（需骰 ≥ {need}）"
+                + f"\n👉 用 `/roll d20` 擲骰（修正值 {mod:+d} 自動套用）")
+        return None, line
     d = g.d20()
     total = d + mod
     ok = d >= 20 or (d > 1 and total >= dc)
     line = _render_check(actor, ability, d, mod, total, dc, ok)
     g.ledger.add(actor, "check", line, d20=d, mod=mod, total=total,
                  dc=dc, ok=ok)
+    return ok, line
+
+
+def resolve_pending_check(g: Game, die: int) -> tuple[bool, str]:
+    """Resolve a pending check with the player's own d20 roll."""
+    p = getattr(g, "_pending_check", None)
+    if not p:
+        return False, ""
+    g._pending_check = None
+    mod = p["mod"]
+    dc = p["dc"]
+    total = die + mod
+    ok = die >= 20 or (die > 1 and total >= dc)
+    line = _render_check(p["actor"], p["ability"], die, mod, total,
+                         dc, ok)
+    g.ledger.add(p["actor"], "check", line, d20=die, mod=mod,
+                 total=total, dc=dc, ok=ok)
     return ok, line
 
 
@@ -292,7 +323,7 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
 
     if it.action == "search":
         s = g.world.here
-        ok, line = ability_check(g, actor, "WIS", s.search_dc, "perception")
+        ok, line = ability_check(g, actor, "WIS", s.search_dc, "perception", auto=False)
         lines = [line]
         if ok and s.hidden_items:
             for name, qty in s.hidden_items:
@@ -334,7 +365,7 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         if ability not in ("STR", "DEX", "CON", "INT", "WIS", "CHA"):
             ability = "DEX"
         dc = int(it.args.get("dc", 12))
-        ok, line = ability_check(g, actor, ability, dc)
+        ok, line = ability_check(g, actor, ability, dc, auto=False)
         g.ledger.add(actor, "creative",
                      f"{actor} 的花招（{it.utterance[:60]}）——"
                      + ("成功" if ok else "失敗"),
@@ -361,10 +392,10 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
             disp = npc.get("disposition", "neutral")
             lines = [f"🗣 {actor} 向 {npc['name']}：{it.utterance}"]
             if disp in ("hostile", "suspicious"):
-                ok, line = ability_check(g, actor, "CHA", 14, "persuasion")
+                ok, line = ability_check(g, actor, "CHA", 14, "persuasion", auto=False)
                 lines.append(line)
             elif disp in ("negotiating", "neutral", "wary"):
-                ok, line = ability_check(g, actor, "CHA", 12, "persuasion")
+                ok, line = ability_check(g, actor, "CHA", 12, "persuasion", auto=False)
                 lines.append(line)
             else:  # friendly/allied: no gate, the NPC engages willingly
                 ok = True
@@ -379,7 +410,7 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         return ResolveResult([f"💬 {actor}：「{it.utterance}」"])
 
     if it.action == "check":
-        ok, line = ability_check(g, actor, it.ability or "STR", 13)
+        ok, line = ability_check(g, actor, it.ability or "STR", 13, auto=False)
         return ResolveResult([line])
 
     if it.action == "pass":

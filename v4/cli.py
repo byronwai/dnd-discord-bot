@@ -154,8 +154,17 @@ def selftest() -> None:
         assert any("輪到" in x for x in L), L
         L.clear()
 
-    # search on your turn: engine check + hidden loot
+    # search on your turn: pending check → player rolls → resolved
     (await_turn("大力蕉") and run("大力蕉 搜索")) or run("依思 搜索")
+    # now the check is pending (player must /roll d20)
+    pend = getattr(g, "_pending_check", None)
+    if pend:
+        from v4.rules_core import resolve_pending_check
+        ok, line = resolve_pending_check(g, g.d20())
+        if ok and g.world.here.hidden_items:
+            for name, qty in g.world.here.hidden_items:
+                g.give_item(pend["actor"], name, qty)
+            g.world.here.hidden_items = []
     assert any(e.kind == "check" for e in g.ledger.entries)
     L.clear()
 
