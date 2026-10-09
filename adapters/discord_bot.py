@@ -893,6 +893,41 @@ class DiscordBot(discord.Client):
                            description="Nudge the DM if the game stalls / 遊戲卡住時推進劇情")
         async def continue_cmd(interaction: discord.Interaction):
             cid = str(interaction.channel_id)
+            v4ch = (os.environ.get("V4_CHANNEL_ID") or "").strip()
+            if v4ch and cid == v4ch:
+                await _announce(interaction, "runs `/continue`")
+                # v4: check for stuck state, then re-narrate the scene
+                svc = self._v4_service()
+                g = svc.game
+                lines = []
+                if svc.pending is not None:
+                    p = svc.pending
+                    lines.append(f"❓ 待確認：**{p.actor or '?'} {p.action}"
+                                 f" {p.target or p.destination or p.item or ''}**"
+                                 "——回覆「確認」執行")
+                if g.combat.active:
+                    cur = g.combat.current()
+                    if cur and not cur.get("npc"):
+                        lines.append(f"⚔️ 戰鬥 R{g.combat.round}——輪到 "
+                                     f"**{cur['name']}**")
+                    elif cur:
+                        lines.append(f"⚔️ 戰鬥 R{g.combat.round}——敵方回合，"
+                                     "用 /act 行動或 pass")
+                if not lines:
+                    lines.append("🔄 場景：" + g.world.here.name)
+                    # re-narrate the scene with a fresh hook
+                    facts = [e.text for e in g.ledger.entries[-5:]]
+                    brief = "；".join(f"{n} {e['hp_now']}/{e['hp_max']}HP"
+                                     for n, e in g.party.items())
+                    narr = await svc.narrator.narrate(
+                        facts, g.world.here.name, brief,
+                        hints=[f"眾人目前在{g.world.here.name}。"
+                               f"{g.world.here.description}",
+                               "給玩家一個新的視角或鉤子，推進故事。"])
+                    if narr:
+                        lines.append("📖 " + narr)
+                await interaction.response.send_message("\n".join(lines)[:1900])
+                return
             if self.engine.turn_in_flight("discord", cid):
                 await interaction.response.send_message(
                     "⏳ DM 仍在生成上一個回應——請再等一下；真的卡死時再按一次 /continue。")
