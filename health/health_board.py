@@ -291,7 +291,8 @@ def read_new_v4_entries(path: str, cursor: int) -> tuple[int, list]:
     new = entries[cursor:cursor + 15]
     return (cursor + len(new)), [
         f"[v4 t{e.get('turn', '?')}][{e.get('kind', '?')}] "
-        f"{e.get('actor', '?')}: {e.get('text', '')}" for e in new]
+        f"{e.get('actor', '?')}: {e.get('text', '')}" for e in new
+        if e.get("kind") not in ("table",)]  # table talk = not game log
 
 
 def v4_summary(path: str) -> str:

@@ -445,7 +445,8 @@ class DiscordBot(discord.Client):
             await interaction.response.defer(thinking=True)
             try:
                 lines, narration = await svc._v4_service().handle(
-                    text, interaction.user.display_name)
+                    text, interaction.user.display_name,
+                    user_id=str(interaction.user.id))
             except Exception as e:
                 log.exception("v4 turn failed")
                 await interaction.followup.send(f"⚠️ {e}")

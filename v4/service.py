@@ -110,8 +110,11 @@ class V4Service:
 
     # ---------- one turn ----------
 
-    async def handle(self, text: str, author: str = "") -> tuple[list, str]:
-        """Free-form text in → (engine lines, narration). Never raises."""
+    async def handle(self, text: str, author: str = "",
+                     user_id: str = "") -> tuple[list, str]:
+        """Free-form text in → (engine lines, narration). Never raises.
+        user_id: Discord uid — the engine enforces that only the character's
+        owner can act as that character."""
         g = self.game
         t = (text or "").strip()
         if not t:
@@ -135,6 +138,15 @@ class V4Service:
                     list(g.world.here.exits.values()),
                     known_targets=list(g.enemies) +
                     [n["name"] for n in g.world.here.npcs] + list(g.party))
+        # ownership: only the character's owner may act as that character
+        if user_id and it and it.actor and it.actor in g.party:
+            oid = str(g.party[it.actor].get("owner_id", ""))
+            if oid and oid != str(user_id):
+                g.ledger.add(it.actor, "deny",
+                             f"拒絕：{it.actor} 屬於其他玩家",
+                             reason="ownership")
+                return ([f"🚫 {it.actor} 屬於其他玩家——"
+                         "你不能控制這個角色。"], "")
         idx0 = len(g.ledger.entries)  # this turn's slice of the ledger
         r = resolve(g, it)
         if r.confirm is not None:
@@ -147,8 +159,24 @@ class V4Service:
             facts = [e.text for e in g.ledger.entries[idx0:]]
             brief = "；".join(f"{n} {e['hp_now']}/{e['hp_max']}HP"
                              for n, e in g.party.items())
+            # pass NPC knowledge constraints if this was a talk turn
+            npc_knows, npc_name = None, ""
+            for e in g.ledger.entries[idx0:]:
+                if e.kind == "talk" and e.data.get("npc"):
+                    npc_name = e.data["npc"]
+                    for n in g.world.here.npcs:
+                        if n["name"] == npc_name:
+                            npc_knows = n.get("knows", [])
+                            break
             narration = await self.narrator.narrate(
-                facts, g.world.here.name, brief, hints=hints)
+                facts, g.world.here.name, brief, hints=hints,
+                npc_knows=npc_knows, npc_name=npc_name)
+            # force Traditional Chinese (models skew Simplified)
+            try:
+                from opencc import OpenCC
+                narration = OpenCC("s2t").convert(narration)
+            except ImportError:
+                pass
             if not narration and hints:
                 narration = "\n".join(hints)  # degraded: skeleton IS prose
         self._save()

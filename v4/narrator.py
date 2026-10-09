@@ -14,10 +14,11 @@ class Narrator:
         self.model = model
 
     async def narrate(self, facts: list, scene: str, party_brief: str,
-                      hints: list = ()) -> str:
-        """hints = the engine's pre-rendered prose skeletons (templates.py).
-        The LLM's ONLY job is to polish them into one flowing paragraph —
-        no new facts, no numbers of its own, 60~100 字."""
+                      hints: list = (), npc_knows: list = None,
+                      npc_name: str = "") -> str:
+        """hints = engine prose skeletons; npc_knows = facts an NPC may
+        reveal (None = no NPC dialogue this turn). The LLM's ONLY job is
+        atmosphere — never game content, never dice, never outcomes."""
         if not facts:
             return ""
         hint_block = ""
@@ -25,15 +26,26 @@ class Narrator:
             hint_block = ("\n骨架句（依序作為段落骨架，可潤飾與連接，"
                           "但不得更改其內容）：\n"
                           + "\n".join(f"- {h}" for h in hints))
+        npc_block = ""
+        if npc_knows is not None and npc_name:
+            knows_txt = ("、".join(npc_knows) if npc_knows
+                         else "（此NPC沒有可透露的情報）")
+            npc_block = (
+                f"\n⚠️ NPC 對話規則（{npc_name}）：你只能讓此NPC說出"
+                f"以下已知事實：{knows_txt}。\n"
+                "絕不得透露不在清單上的資訊（不得給予地點、物品、"
+                "攻略建議、劇情推測）；可以閒聊、可以拒絕回答、"
+                "可以要求交換條件。\n")
         prompt = (
             "你是地下城主。把下列「骨架句」潤飾成 80~160 字、連貫的"
             "繁體中文敘事段落。\n"
-            "鐵律：骨架句裡的行動者、成敗、對象一律照抄不得更改；"
-            "不得新增任何判定、傷害或行動；不要列出數字算式；"
-            "只補感官細節與氛圍。\n"
-            "例外（NPC 對話）：若骨架是「向某 NPC 交談」，你可以替該 NPC "
-            "發言——依其身分與態度說出符合劇情的回應（可透露線索、提出要求、"
-            "拒絕或反問），但不得給予物品、傷害或任何機械效果。\n"
+            "鐵律（絕對遵守）：\n"
+            "· 骨架句裡的行動者、成敗、對象一律照抄不得更改\n"
+            "· 不得新增任何判定、傷害、物品或行動\n"
+            "· 不要列出數字算式\n"
+            "· 只補感官細節與氛圍\n"
+            "· 絕不使用簡體字\n"
+            f"{npc_block}"
             f"場景：{scene}\n隊伍現況：{party_brief}{hint_block}\n"
             "（引擎事實，僅供核對，不要複述：\n"
             + "\n".join(f"- {f}" for f in facts) + "）")
