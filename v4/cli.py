@@ -17,7 +17,16 @@ from v4.turn import Game
 from v4.world import World, Scene, Enemy
 
 
-def build_demo_game() -> Game:
+def build_demo_game(seed: int = None) -> Game:
+    """seed pins the game's own RNG (initiative, dice, enemy targeting) —
+    selftests pass a seed for byte-identical replays."""
+    g = _build_demo_world_party()
+    if seed is not None:
+        g._random.seed(seed)
+    return g
+
+
+def _build_demo_world_party() -> Game:
     world = World()
     world.add_scene(Scene(
         "dock", "霧錨鎮碼頭",
@@ -84,7 +93,7 @@ def handle(g: Game, text: str) -> list[str]:
 
 
 def repl() -> None:
-    g = build_demo_game()
+    g = build_demo_game(seed=int(os.environ.get("V4_SEED", "7")))
     random.seed()  # fair dice in interactive mode
     print("=== v4 engine · no-LLM mode ===  (status/scene/inv/moves, "
           "或「角色 動詞 賓語」；Ctrl-D 離開)")
@@ -101,7 +110,7 @@ def repl() -> None:
 
 
 def selftest() -> None:
-    random.seed(int(os.environ.get("V4_SEED", "42")))  # deterministic; overridable
+
     g = build_demo_game()
     L = []
 
