@@ -26,7 +26,7 @@ class Narrator:
                           "但不得更改其內容）：\n"
                           + "\n".join(f"- {h}" for h in hints))
         prompt = (
-            "你是地下城主。把下列「骨架句」潤飾成 60~100 字、連貫的"
+            "你是地下城主。把下列「骨架句」潤飾成 80~160 字、連貫的"
             "繁體中文敘事段落。\n"
             "鐵律：骨架句裡的行動者、成敗、對象一律照抄不得更改；"
             "不得新增任何判定、傷害或行動；不要列出數字算式；"
@@ -39,7 +39,7 @@ class Narrator:
                 r = await c.post(f"{self.url}/v1/chat/completions", json={
                     "model": self.model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.7, "max_tokens": 280})
+                    "temperature": 0.7, "max_tokens": 400})
                 r.raise_for_status()
                 text = (r.json()["choices"][0]["message"]["content"] or "").strip()
             return text
