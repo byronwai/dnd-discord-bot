@@ -151,14 +151,21 @@ class V4Service:
                     known_targets=list(g.enemies) +
                     [n["name"] for n in g.world.here.npcs] + list(g.party))
         # ownership: only the character's owner may act as that character
-        if user_id and it and it.actor and it.actor in g.party:
-            oid = str(g.party[it.actor].get("owner_id", ""))
-            if oid and oid != str(user_id):
-                g.ledger.add(it.actor, "deny",
-                             f"拒絕：{it.actor} 屬於其他玩家",
-                             reason="ownership")
-                return ([f"🚫 {it.actor} 屬於其他玩家——"
-                         "你不能控制這個角色。"], "")
+        if user_id and it:
+            # no actor specified → default to the CALLER's character
+            if not it.actor:
+                it.actor = next(
+                    (n for n, v in g.party.items()
+                     if str(v.get("owner_id", "")) == str(user_id)),
+                    next(iter(g.party)))
+            if it.actor and it.actor in g.party:
+                oid = str(g.party[it.actor].get("owner_id", ""))
+                if oid and oid != str(user_id):
+                    g.ledger.add(it.actor, "deny",
+                                 f"拒絕：{it.actor} 屬於其他玩家",
+                                 reason="ownership")
+                    return ([f"🚫 {it.actor} 屬於其他玩家——"
+                             "你不能控制這個角色。"], "")
         idx0 = len(g.ledger.entries)  # this turn's slice of the ledger
         # player input scrubbing (v3: injection defense)
         from .guards import scrub_input

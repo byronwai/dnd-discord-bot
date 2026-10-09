@@ -507,8 +507,13 @@ class DiscordBot(discord.Client):
 
         async def _v4_turn(interaction, text, echo=None,
                            structured=False):
-            """Player v4 turn: engine output (instant) → narrate.
+            """Player v4 turn: public echo → engine output → narrate.
             structured=True skips the digestor (from /combat dropdowns)."""
+            # public echo: other players need to see what was issued
+            # (slash command inputs are invisible in the channel)
+            await interaction.channel.send(
+                f"🎭 **{interaction.user.display_name}** "
+                f"{_clip(text, 200)}")
             await interaction.response.defer(thinking=True)
             try:
                 lines, narration = await svc._v4_service().handle(
