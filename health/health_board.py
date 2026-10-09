@@ -253,12 +253,69 @@ def read_board(db_path: str):
                 events = [r[0] for r in conn.execute(EVENTS_SQL)]
             except sqlite3.OperationalError:
                 events = []  # events table absent on older DBs
+            ev_head = conn.execute(
+                "SELECT COALESCE(MAX(id),0) FROM events WHERE " + CHAT_WHERE
+            ).fetchone()[0]
         finally:
             conn.close()
     except sqlite3.Error:
         return None
     return (_json(row[0]), row[1], row[2], _json(row[3]), _json(row[4]),
-            reply[0] if reply else None, events)
+            reply[0] if reply else None, events, ev_head)
+
+
+def read_new_events(db_path: str, last_id: int) -> tuple[int, list]:
+    """(new_cursor, new event lines) — v3 engine facts since last push."""
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=1.0)
+        try:
+            rows = conn.execute(
+                "SELECT id, line FROM events WHERE " + CHAT_WHERE +
+                " AND id > ? ORDER BY id LIMIT 15", (last_id,)).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return last_id, []
+    return (rows[-1][0] if rows else last_id), [r[1] for r in rows]
+
+
+def read_new_v4_entries(path: str, cursor: int) -> tuple[int, list]:
+    """(new_cursor, new lines) — v4 ledger entries since last push."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            entries = json.load(f).get("entries", [])
+    except (OSError, ValueError):
+        return cursor, []
+    if len(entries) < cursor:
+        cursor = 0  # the playground state was reset
+    new = entries[cursor:cursor + 15]
+    return (cursor + len(new)), [
+        f"[v4 t{e.get('turn', '?')}][{e.get('kind', '?')}] "
+        f"{e.get('actor', '?')}: {e.get('text', '')}" for e in new]
+
+
+def v4_summary(path: str) -> str:
+    """One compact debug block for the board message."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            blob = json.load(f)
+    except (OSError, ValueError):
+        return ""
+    world = blob.get("world", {})
+    cur = world.get("scenes", {}).get(world.get("current", ""), {})
+    combat = blob.get("combat") or {}
+    lines = [f"🧪 v4 playground：{cur.get('name', '?')} · turn "
+             f"{blob.get('turn', 0)} · "
+             + (f"戰鬥 R{combat.get('round', '?')}" if combat.get("order")
+                else "探索")]
+    for n, e in blob.get("party", {}).items():
+        lines.append(f"　{n} {e.get('hp_now')}/{e.get('hp_max')}HP "
+                     f"slots {e.get('slots') or {}}")
+    for n, f in (blob.get("enemies") or {}).items():
+        if not f.get("dead"):
+            lines.append(f"　👹 {n} {f.get('hp')}/{f.get('hp_max')} "
+                         f"AC{f.get('ac')}")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------- state file
@@ -354,6 +411,9 @@ class HealthBoardBot(discord.Client):
         self._task = None
         self.tree = app_commands.CommandTree(self)
         self._register_commands()
+        self.v4_path = os.path.join(os.path.dirname(os.path.abspath(db_path)),
+                                    "v4_state.json")
+        self.log_state = load_state()
 
     def _register_commands(self):
         @self.tree.command(name="moves",
@@ -471,13 +531,60 @@ class HealthBoardBot(discord.Client):
                 reply_push = True  # a new DM reply landed
             self._last_max_id = max_id
         if not reply_push and time.monotonic() < self._next_full:
+            await self._push_logs()  # logs flow even between board refreshes
             return
         data = read_board(self.db_path)
         if data is None:
             return
         self._next_full = time.monotonic() + FULL_REFRESH
-        content = render(*data, time.monotonic() - self.started)
+        content = render(*data[:7], time.monotonic() - self.started)
+        v4s = v4_summary(self.v4_path)
+        if v4s:
+            content += "\n" + v4s
         await self._publish(content, bypass_throttle=reply_push)
+        await self._push_logs()
+
+    async def _push_logs(self):
+        """Debug portal: stream new engine facts (v3 events + v4 ledger)
+        into the channel as batched log messages."""
+        if self.channel is None:
+            return
+        # first run: park the cursors at the current head (no backlog flood)
+        if "last_event_id" not in self.log_state:
+            try:
+                conn = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True,
+                                       timeout=1.0)
+                try:
+                    head = conn.execute("SELECT COALESCE(MAX(id),0) FROM events "
+                                        "WHERE " + CHAT_WHERE).fetchone()[0]
+                finally:
+                    conn.close()
+            except sqlite3.Error:
+                head = 0
+            self.log_state["last_event_id"] = head
+        if "last_v4_len" not in self.log_state:
+            try:
+                with open(self.v4_path, encoding="utf-8") as f:
+                    self.log_state["last_v4_len"] = len(
+                        json.load(f).get("entries", []))
+            except (OSError, ValueError):
+                self.log_state["last_v4_len"] = 0
+        cur_ev, ev_lines = read_new_events(
+            self.db_path, self.log_state["last_event_id"])
+        cur_v4, v4_lines = read_new_v4_entries(
+            self.v4_path, self.log_state["last_v4_len"])
+        lines = [f"[v3] {l}" for l in ev_lines] + v4_lines
+        if not lines:
+            return
+        try:
+            await self.channel.send(
+                "🧪 **debug log**\n" + "\n".join(lines)[:1900])
+        except discord.HTTPException as exc:
+            log.warning("log push failed: %s", exc)
+            return
+        self.log_state["last_event_id"] = cur_ev
+        self.log_state["last_v4_len"] = cur_v4
+        save_state(**self.log_state)
 
     async def _publish(self, content: str, bypass_throttle: bool) -> None:
         if content == self.last_content:
