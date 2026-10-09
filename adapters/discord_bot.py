@@ -368,6 +368,63 @@ class DiscordBot(discord.Client):
                 f"{icon} {character} now carries: "
                 f"{self.engine.inv_text('discord', cid, character)}")
 
+        async def item_admin_autocomplete(interaction, current: str):
+            """Suggest item names: the party's carried items plus a small
+            standard catalog — free text still allowed."""
+            cid = str(interaction.channel_id)
+            names: list[str] = []
+            v4ch = (os.environ.get("V4_CHANNEL_ID") or "").strip()
+            if v4ch and cid == v4ch and self.v4 is not None:
+                for stacks in self.v4.game.inventory.values():
+                    names += [n for n, _q in stacks]
+            else:
+                for _cn, entries in self.engine.inv_list("discord", cid).items():
+                    names += [n for _k, n, _q in entries]
+            names += ["治療藥水", "火把", "繩索", "匕首", "長劍", "木盾",
+                      "乾糧", "解毒劑"]
+            seen, out = set(), []
+            q = (current or "").strip().lower()
+            for n in names:
+                if n in seen:
+                    continue
+                seen.add(n)
+                if not q or q in n.lower():
+                    out.append(app_commands.Choice(name=n[:100],
+                                                   value=n[:100]))
+            return out[:25]
+
+        @self.tree.command(name="give-admin",
+                           description="(Admin) give an item to ANY character / 管理員給予物品")
+        @app_commands.describe(character="要給予的角色（清單挑選）",
+                               item="物品名（清單挑選或自填）",
+                               qty="數量（預設 1）")
+        @app_commands.autocomplete(character=any_char_autocomplete,
+                                   item=item_admin_autocomplete)
+        async def give_admin_cmd(interaction: discord.Interaction,
+                                 character: str, item: str, qty: int = 1):
+            if not interaction.user.guild_permissions.manage_guild:
+                await interaction.response.send_message(
+                    "🚫 僅伺服器管理員可使用 /give-admin。")
+                return
+            cid = str(interaction.channel_id)
+            v4ch = (os.environ.get("V4_CHANNEL_ID") or "").strip()
+            await _announce(interaction,
+                            f"gives **{item}×{qty}** to **{character}** "
+                            f"(`{ '/give-admin' }`)")
+            if v4ch and cid == v4ch:
+                out = self._v4_service().admin_give(character, item, qty)
+                await interaction.followup.send(out)
+                return
+            party = self.engine.get_party("discord", cid)
+            if not isinstance(party.get(character), dict):
+                await interaction.followup.send(
+                    f"❓ No character named {character}.")
+                return
+            self.engine.inv_add("discord", cid, character, item, qty)
+            await interaction.followup.send(
+                f"🎒 {character} now carries: "
+                f"{self.engine.inv_text('discord', cid, character)}")
+
         @self.tree.command(name="take", description="Remove an item from a character / 取走物品")
         @app_commands.describe(character="Character name", item="Item name",
                                qty="Quantity (default 1)")
@@ -1240,8 +1297,9 @@ class DiscordBot(discord.Client):
             return True
         return False
 
-    async def _v4_message(self, message: discord.Message):
-        """Engine-driven v4 turn: digest → engine (instant) → narrate."""
+    def _v4_service(self):
+        """Lazy-init the engine-driven service (shared by the channel
+        router and admin commands)."""
         if self.v4 is None:
             from v4.service import V4Service
             self.v4 = V4Service(
@@ -1249,6 +1307,11 @@ class DiscordBot(discord.Client):
                 os.environ.get("LLM_URL", "http://127.0.0.1:11434"),
                 os.environ.get("V4_DIGEST_MODEL", "gemma3:12b-it-qat"),
                 os.environ.get("V4_NARR_MODEL", "gemma3:27b-it-qat"))
+        return self.v4
+
+    async def _v4_message(self, message: discord.Message):
+        """Engine-driven v4 turn: digest → engine (instant) → narrate."""
+        svc = self._v4_service()
         status = await message.channel.send("⚙️ 引擎處理中…")
         try:
             lines, narration = await self.v4.handle(

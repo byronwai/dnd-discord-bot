@@ -85,6 +85,19 @@ class V4Service:
             g.ledger.entries.append(Entry(**e))
         return g
 
+    # ---------- admin helpers ----------
+
+    def admin_give(self, char: str, item: str, qty: int = 1) -> str:
+        """Admin grants items directly (ledgered). Returns the render."""
+        g = self.game
+        if char not in g.party:
+            return f"❓ 沒有角色「{char}」"
+        g.give_item(char, item, max(1, int(qty or 1)))
+        g.ledger.add("admin", "item", f"管理員給了 {char} {item}×{qty}")
+        self._save()
+        inv = "、".join(f"{n}×{q}" for n, q in g.inventory.get(char, []))
+        return f"🎒 {char} 現在攜帶：{inv or '（空）'}"
+
     # ---------- one turn ----------
 
     async def handle(self, text: str, author: str = "") -> tuple[list, str]:
