@@ -732,6 +732,10 @@ class DiscordBot(discord.Client):
             if st and st.get("order"):
                 _npcs, act = self.engine.combat_act_window(st)
                 my_turn = act is not None and act["name"] == character
+            v4ch = (os.environ.get("V4_CHANNEL_ID") or "").strip()
+            if v4ch and cid == v4ch:
+                await self._v4_admin_turn(interaction, character, text)
+                return
             echo = (f"🎛 **{interaction.user.display_name}** (admin) takes over "
                     f"**{character}**：{_clip(text, 300)}")
             await self._dm_turn_interaction(
@@ -755,6 +759,11 @@ class DiscordBot(discord.Client):
                     "⚠️ 請在指令內選擇角色（character）。")
                 return
             if text.strip():
+                v4ch = (os.environ.get("V4_CHANNEL_ID") or "").strip()
+                if v4ch and cid == v4ch:
+                    await self._v4_admin_turn(interaction,
+                                              character.strip(), text)
+                    return
                 await self._admin_combat_act(interaction, cid,
                                              character.strip(), text)
                 return
@@ -832,6 +841,13 @@ class DiscordBot(discord.Client):
                 _npcs, act = self.engine.combat_act_window(st)
                 my_turn = act is not None and act["name"] == character
             owner_id = str(entry.get("owner_id") or interaction.user.id)
+            v4ch = (os.environ.get("V4_CHANNEL_ID") or "").strip()
+            if v4ch and cid == v4ch:
+                await self._v4_admin_turn(
+                    interaction, character,
+                    f"攻擊 {verdict['target']}" +
+                    (f" {verdict.get('move')}" if verdict.get("move") else ""))
+                return
             await self._dm_turn_interaction(
                 interaction, character, f"我攻擊 {verdict['target']}！",
                 user_id=owner_id, combat_turn=my_turn,
@@ -1352,6 +1368,57 @@ class DiscordBot(discord.Client):
                 os.environ.get("V4_DIGEST_MODEL", "gemma3:12b-it-qat"),
                 os.environ.get("V4_NARR_MODEL", "gemma3:27b-it-qat"))
         return self.v4
+
+    async def _v4_admin_turn(self, interaction: discord.Interaction,
+                             character: str, text: str):
+        """Admin drives a character through the v4 pipeline: construct the
+        intent directly (no digestor needed), resolve, narrate."""
+        await interaction.response.defer(thinking=True)
+        status = await interaction.followup.send(
+            f"🎛 **{interaction.user.display_name}** (admin) → "
+            f"**{character}**：`{_clip(text, 200)}`")
+        svc = self._v4_service()
+        g = svc.game
+        if character not in g.party:
+            await status.edit(content=f"❓ 沒有角色「{character}」")
+            return
+        from v4.intent import Intent
+        # try the deterministic parser first; fall back to digestor
+        it = None
+        from v4.intent import parse_command
+        it = parse_command(text, party_names=list(g.party))
+        if it is None or it.actor != character:
+            # force the actor and try digestor for freeform
+            it = await svc.digestor.digest(
+                text, list(g.party), g.world.here.name,
+                list(g.world.here.exits.values()),
+                known_targets=list(g.enemies) +
+                [n["name"] for n in g.world.here.npcs] + list(g.party))
+        it.actor = character  # admin override: this character acts
+        from v4.rules_core import resolve as v4_resolve
+        r = v4_resolve(g, it)
+        lines = r.lines
+        narration = ""
+        if r.accepted and r.lines:
+            from v4.templates import render_hint
+            idx0 = len(g.ledger.entries) - \
+                sum(1 for e in g.ledger.entries if e.turn == g.ledger.turn)
+            hints = [h for h in (render_hint(e, g)
+                                 for e in g.ledger.entries[idx0:]) if h]
+            facts = [e.text for e in g.ledger.entries[idx0:]]
+            brief = "；".join(f"{n} {e['hp_now']}/{e['hp_max']}HP"
+                             for n, e in g.party.items())
+            narration = await svc.narrator.narrate(
+                facts, g.world.here.name, brief, hints=hints)
+        try:
+            await status.delete()
+        except discord.HTTPException:
+            pass
+        body = "\n".join(lines)
+        if body:
+            await interaction.followup.send(_clip(body))
+        if narration:
+            await interaction.followup.send("📖 " + _clip(narration))
 
     async def _v4_message(self, message: discord.Message):
         """Plain text in the v4 channel = table talk: ledger it, stay quiet.
