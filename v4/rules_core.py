@@ -350,6 +350,31 @@ def resolve(g: Game, it: Intent) -> ResolveResult:
                               "（效果由敘事層描述；機械後果走 attack/use）"])
 
     if it.action in ("talk",):
+        # addressing a scene NPC: a real social exchange — the engine picks
+        # the difficulty from disposition, the narrator voices the reply
+        npc = None
+        if it.target:
+            for n in g.world.here.npcs:
+                if it.target in n["name"] or n["name"] in it.target:
+                    npc = n
+                    break
+        if npc is not None:
+            disp = npc.get("disposition", "neutral")
+            lines = [f"🗣 {actor} 向 {npc['name']}：{it.utterance}"]
+            if disp in ("hostile", "suspicious"):
+                ok, line = ability_check(g, actor, "CHA", 14, "persuasion")
+                lines.append(line)
+            elif disp in ("negotiating", "neutral", "wary"):
+                ok, line = ability_check(g, actor, "CHA", 12, "persuasion")
+                lines.append(line)
+            else:  # friendly/allied: no gate, the NPC engages willingly
+                ok = True
+            g.ledger.add(actor, "talk",
+                         f"{actor} 向 {npc['name']}：{it.utterance}"
+                         + ("（交談順利）" if ok else "（對方興趣缺缺）"),
+                         utterance=it.utterance, npc=npc["name"], ok=ok,
+                         disposition=disp)
+            return ResolveResult(lines)
         g.ledger.add(actor, "talk", f"{actor}：「{it.utterance}」",
                      utterance=it.utterance)
         return ResolveResult([f"💬 {actor}：「{it.utterance}」"])

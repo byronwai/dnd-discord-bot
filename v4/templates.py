@@ -107,6 +107,18 @@ def render_hint(entry, game=None) -> str:
     if kind == "rest":
         return "隊伍稍作喘息，恢復了體力。"
 
+    if kind == "talk" and d.get("npc"):
+        npc = d.get("npc")
+        u = d.get("utterance", "交談")
+        if d.get("ok"):
+            return _pick([
+                f"{actor} 向 {npc} 表明來意——{npc} 沉吟片刻，開口回應。",
+                f"{npc} 注意到 {actor} 的誠意，願意一談。"],
+                actor + npc)
+        return _pick([
+            f"{npc} 對 {actor} 的{u}反應冷淡，興趣缺缺。",
+            f"{npc} 搖了搖頭，似乎不想多談。"], actor + npc)
+
     if kind == "talk":
         return entry.text
 
