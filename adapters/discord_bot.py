@@ -715,7 +715,10 @@ class DiscordBot(discord.Client):
                 await interaction.followup.send("📖 " + _clip(narration))
 
         async def _v4_admin(interaction, character, text):
-            """Admin v4 turn for any character."""
+            """Admin v4 turn for any character — with public echo."""
+            await interaction.channel.send(
+                f"🎛 **{interaction.user.display_name}** (admin) — "
+                f"**{character}** {_clip(text, 200)}")
             await interaction.response.defer(thinking=True)
             try:
                 out = await svc._v4_admin_run(interaction, character, text)
