@@ -9,10 +9,10 @@ import re
 
 from engine.charlib import slots_for
 from engine.checks import total_mod
-from engine.dm import DMEngine, compute_attack_moves
+from engine.moves import compute_attack_moves, move_spell_level
 from engine.dice import roll_expr
 
-MOVE_SPELL_LEVEL = DMEngine.MOVE_SPELL_LEVEL
+MOVE_SPELL_LEVEL = move_spell_level
 
 from .intent import Intent
 from .turn import Game
