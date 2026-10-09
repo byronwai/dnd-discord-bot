@@ -235,8 +235,9 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
                 [f"⏳ {reason}——請該角色行動"], accepted=False)
 
     if it.action == "attack":
-        # risky action: engine confirms the parsed intent once
-        if it.confidence < 1.0 and not it.args.get("confirmed"):
+        # confirm only when the digestor is genuinely uncertain (freeform
+        # /explore with ambiguous phrasing); /combat always sets confidence=1
+        if it.confidence < 0.7 and not it.args.get("confirmed"):
             return ResolveResult(
                 [f"❓ 我理解你要：**{actor} 攻擊 {it.target}**"
                  "——回覆「確認」執行，或描述其他行動。"],

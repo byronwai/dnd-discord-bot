@@ -106,10 +106,14 @@ class V4Service:
     # ---------- one turn ----------
 
     async def handle(self, text: str, author: str = "",
-                     user_id: str = "") -> tuple[list, str]:
+                     user_id: str = "",
+                     structured: bool = False) -> tuple[list, str]:
         """Free-form text in → (engine lines, narration). Never raises.
         user_id: Discord uid — the engine enforces that only the character's
-        owner can act as that character."""
+        owner can act as that character.
+        structured: True = the text came from /combat (dropdown selections
+        are already unambiguous) — skip the digestor entirely, construct
+        the Intent deterministically, confidence=1.0, no confirmation."""
         g = self.game
         t = (text or "").strip()
         if not t:
@@ -127,6 +131,19 @@ class V4Service:
         if t.startswith(("((", "//")):  # explicit out-of-character
             from .intent import Intent
             it = Intent(action="chat", utterance=t.lstrip("(/ "), raw=t)
+        elif structured:
+            # /combat selections: deterministic parse, confidence=1.0
+            from .intent import parse_command
+            it = parse_command(t, party_names=list(g.party))
+            if it is not None:
+                it.confidence = 1.0
+            else:
+                it = await self.digestor.digest(
+                    t, list(g.party), g.world.here.name,
+                    list(g.world.here.exits.values()),
+                    known_targets=list(g.enemies) +
+                    [n["name"] for n in g.world.here.npcs] + list(g.party))
+                it.confidence = 1.0  # structured origin — trust it
         else:
             it = await self.digestor.digest(
                     t, list(g.party), g.world.here.name,

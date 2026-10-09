@@ -254,7 +254,7 @@ class DiscordBot(discord.Client):
                 text = f"{char} 撤退"
             elif act == "observe":
                 text = f"{char} 觀察"
-            await _v4_turn(interaction, text)
+            await _v4_turn(interaction, text, structured=True)
 
         # ---- /roll ----
 
@@ -455,14 +455,16 @@ class DiscordBot(discord.Client):
         #  shared v4 turn runners (defined last, used above)
         # ------------------------------------------------------------------
 
-        async def _v4_turn(interaction, text, echo=None):
+        async def _v4_turn(interaction, text, echo=None,
+                           structured=False):
             """Player v4 turn: engine output (instant) → narrate.
-            No echo — the engine lines already describe the action."""
+            structured=True skips the digestor (from /combat dropdowns)."""
             await interaction.response.defer(thinking=True)
             try:
                 lines, narration = await svc._v4_service().handle(
                     text, interaction.user.display_name,
-                    user_id=str(interaction.user.id))
+                    user_id=str(interaction.user.id),
+                    structured=structured)
             except Exception as e:
                 log.exception("v4 turn failed")
                 await interaction.followup.send(f"⚠️ {e}")
