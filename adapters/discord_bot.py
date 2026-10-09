@@ -238,9 +238,7 @@ class DiscordBot(discord.Client):
                 text = f"{char} 撤退"
             elif act == "observe":
                 text = f"{char} 觀察"
-            await _v4_turn(interaction, text, echo=
-                           f"⚔️ **{interaction.user.display_name}** — "
-                           f"{action.name}")
+            await _v4_turn(interaction, text)
 
         # ---- /roll ----
 
@@ -442,13 +440,9 @@ class DiscordBot(discord.Client):
         # ------------------------------------------------------------------
 
         async def _v4_turn(interaction, text, echo=None):
-            """Player v4 turn: echo → engine (instant) → narrate."""
-            echo_line = echo or (
-                f"🎭 **{interaction.user.display_name}** "
-                f"{_clip(text, 200)}")
+            """Player v4 turn: engine output (instant) → narrate.
+            No echo — the engine lines already describe the action."""
             await interaction.response.defer(thinking=True)
-            # echo is visible in the channel
-            await interaction.channel.send(echo_line)
             try:
                 lines, narration = await svc._v4_service().handle(
                     text, interaction.user.display_name)
@@ -465,8 +459,6 @@ class DiscordBot(discord.Client):
         async def _v4_admin(interaction, character, text):
             """Admin v4 turn for any character."""
             await interaction.response.defer(thinking=True)
-            await interaction.channel.send(
-                f"🎛 (admin) **{character}** {_clip(text, 200)}")
             try:
                 out = await svc._v4_admin_run(interaction, character, text)
             except Exception as e:
