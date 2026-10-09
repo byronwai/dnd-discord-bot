@@ -109,15 +109,21 @@ class V4Service:
                 list(g.world.here.exits.values()),
                 known_targets=list(g.enemies) +
                 [n["name"] for n in g.world.here.npcs] + list(g.party))
+        idx0 = len(g.ledger.entries)  # this turn's slice of the ledger
         r = resolve(g, it)
         if r.confirm is not None:
             self.pending = r.confirm
         narration = ""
         if r.accepted and r.lines and self.pending is None:
-            facts = [e.text for e in g.ledger.entries[-8:]]
+            from .templates import render_hint
+            hints = [h for h in (render_hint(e, g)
+                                 for e in g.ledger.entries[idx0:]) if h]
+            facts = [e.text for e in g.ledger.entries[idx0:]]
             brief = "；".join(f"{n} {e['hp_now']}/{e['hp_max']}HP"
                              for n, e in g.party.items())
-            narration = await self.narrator.narrate(facts, g.world.here.name,
-                                                    brief)
+            narration = await self.narrator.narrate(
+                facts, g.world.here.name, brief, hints=hints)
+            if not narration and hints:
+                narration = "\n".join(hints)  # degraded: skeleton IS prose
         self._save()
         return r.lines, narration
