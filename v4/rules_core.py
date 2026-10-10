@@ -792,11 +792,16 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
 
     if it.action == "search":
         s = g.world.here
+        # a search that NAMES a thing beats blind RNG: ~50% it's here
+        from .director import ambient_find, named_find, scan_prop
+        named = scan_prop(f"{it.raw or ''} {it.utterance or ''} "
+                          f"{it.item or ''}")
+        if named and not s.hidden_items:
+            named_find(g, named)
         # A3 organic search: nothing authored here — sometimes the
         # world still has a mundane find to reveal (never with the
         # 沒有特別的發現 dead-end every single time)
         if not s.hidden_items:
-            from .director import ambient_find
             ambient_find(g)
         if not s.hidden_items:
             g.ledger.add(actor, "search",

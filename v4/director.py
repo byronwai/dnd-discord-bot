@@ -100,3 +100,45 @@ def ambient_find(g) -> str | None:
                  f"搜索途中世界浮現了 {name}", item=name,
                  scene=g.world.current)
     return name
+
+
+def named_find(g, name: str) -> bool:
+    """A search that NAMES what it's looking for（「我搵下有冇魚鉤」）:
+    ~50% the thing is actually there — intent beats blind RNG when the
+    story needs a specific mundane item."""
+    import random
+    if classify(name) != "prop":
+        return False
+    s = g.world.here
+    if any(name in n or n in name for n, _ in
+           s.ground_items + s.hidden_items):
+        return True  # already here — the check below will reveal it
+    if random.random() > 0.5:
+        return False
+    s.hidden_items.append((name, 1))
+    g.ledger.add("director", "materialize",
+                 f"搜索途中世界浮現了 {name}", item=name,
+                 scene=g.world.current)
+    return True
+
+
+def scan_prop(text: str) -> str:
+    """Known prop/catalog name mentioned in free text — full name first,
+    then distinctive TAILS（「魚鉤」matches 生鏽的魚鉤）, longest wins."""
+    from engine.itemlib import CATALOG
+    t = text or ""
+    for n in sorted(set(_AMBIENT_PROPS) | set(CATALOG),
+                    key=len, reverse=True):
+        if n and n in t:
+            return n
+    for n in sorted(set(_AMBIENT_PROPS) | set(CATALOG),
+                    key=len, reverse=True):
+        if not n:
+            continue
+        for i in range(len(n) - 1, 1, -1):
+            tail = n[i:]
+            if tail.startswith(("的", "著", "個", "一")):
+                continue
+            if tail in t:
+                return n
+    return ""
