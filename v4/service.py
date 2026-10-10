@@ -21,17 +21,25 @@ _HELP_RE = re.compile(
     r"should we|advice", re.I)
 
 
-def load_gamerules() -> dict:
-    """gamerules.json at the repo root — the single source of truth for
-    world tone/canon and narrative constraints. Missing file = {}."""
-    path = os.path.join(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__))), "gamerules.json")
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
+def load_gamerules(channel_id: str = "", data_dir: str = "") -> dict:
+    """gamerules.json — the single source of truth for world tone/canon
+    and narrative constraints. Per-channel override first
+    (data/gamerules_<channel>.json), then the repo-root default."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    paths = []
+    if channel_id and data_dir:
+        paths.append(os.path.join(data_dir,
+                                  f"gamerules_{channel_id}.json"))
+    paths.append(os.path.join(root, "gamerules.json"))
+    for path in paths:
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+        except (OSError, ValueError):
+            continue
+    return {}
 
 
 def world_block(rules: dict) -> str:
@@ -80,9 +88,9 @@ class V4Service:
         # mid-sentence): /continue resumes it before anything else.
         # (init BEFORE _load — the saved blob may restore it)
         self._unfinished = None
-        # game rules (gamerules.json) — world tone + canon the narrator
-        # must stick to; single source of truth, DM-editable
-        self.rules = load_gamerules()
+        # game rules — per-channel override (data/gamerules_<cid>.json)
+        # over the repo-root default; world tone + canon for the narrator
+        self.rules = load_gamerules(channel_id, data_dir)
         # plot spine (plot.json) — clocks + trigger-fired beats
         self.plot = load_plot()
         self.game: Game = self._load() or build_demo_game()
@@ -490,6 +498,9 @@ class V4Service:
         if narration:
             self._recent_narrations.append(narration)
             self._recent_narrations = self._recent_narrations[-5:]
+            # v5 seed 5: persist the narration into the ledger — replays
+            # are complete and #dnd-health reviews full prose
+            g.ledger.add("narrator", "narration", narration[:400])
         return narration
 
     async def settle_roll(self, die: int,

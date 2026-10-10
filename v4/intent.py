@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 ACTIONS = ("attack", "move", "use", "cast", "talk", "search",
            "rest", "give", "check", "pass", "creative", "chat",
            "take", "claim", "meta", "skill", "defend", "escape",
-           "observe")
+           "observe", "help")
 
 _VERBS = {
     "attack": ("攻擊", "打", "劈", "斬", "砍", "揼", "踢", "篤", "射",
@@ -31,6 +31,7 @@ _VERBS = {
     "defend": ("防禦", "防御", "閃避", "defend", "dodge"),
     "escape": ("撤退", "逃走", "走為上著", "escape", "flee", "retreat"),
     "observe": ("觀察", "observe", "study", "研究敵人"),
+    "help": ("幫助", "幫手", "支援", "aid", "help"),
 }
 
 # Cantonese aspect markers and particles to strip before verb matching
@@ -129,4 +130,6 @@ def parse_command(text: str, party_names=()) -> Intent | None:
             it.skill = parts[0]
     elif action == "observe":
         it.target = rest  # 「觀察 哥布林①」— find the weak spot on X
+    elif action == "help":
+        it.target = rest  # 「幫助 依思」— aid that character
     return it

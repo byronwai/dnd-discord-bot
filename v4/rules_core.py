@@ -259,6 +259,8 @@ def ability_check(g: Game, actor: str, ability: str, dc: int,
     already clears a low DC, the check auto-succeeds with no roll —
     friction only where the outcome is actually in doubt."""
     mod = total_mod(g.party[actor], ability, skill, "check")
+    helped = bool(isinstance(getattr(g, "_help_check", None), dict)
+                  and g._help_check.pop(actor, False))
     if not auto and dc <= 12 and 10 + mod >= dc:
         sk_zh = ""
         from engine.charlib import SKILL_LABEL
@@ -276,16 +278,18 @@ def ability_check(g: Game, actor: str, ability: str, dc: int,
         need = max(1, dc - mod)
         g._pending_check = {
             "actor": actor, "ability": ability, "skill": skill,
-            "dc": dc, "mod": mod, "effect": effect or None}
+            "dc": dc, "mod": mod, "effect": effect or None,
+            "helped": helped}
         line = (f"🎯 {actor} {ability}"
                 + (f"（{SKILL_LABEL.get(skill, skill)}）" if skill else "")
                 + f" 檢定 vs DC {dc}（需骰 ≥ {need}）"
+                + ("　🤝有人幫忙：你的骰與系統加骰取高" if helped else "")
                 + f"\n👉 用 `/roll d20` 擲骰（修正值 {mod:+d} 自動套用）")
         return None, line
     # v5 seed 3: inspiration also covers engine-rolled checks
     inspired = g.drop_cond(actor, "inspired")
     d = g.d20()
-    if inspired:
+    if inspired or helped:
         d2 = g.d20()
         d = max(d, d2)
     total = d + mod
@@ -293,6 +297,8 @@ def ability_check(g: Game, actor: str, ability: str, dc: int,
     line = _render_check(actor, ability, d, mod, total, dc, ok, skill)
     if inspired:
         line += "（✨靈感優勢已消耗）"
+    if helped:
+        line += "（🤝援助優勢）"
     g.ledger.add(actor, "check", line, d20=d, mod=mod, total=total,
                  dc=dc, ok=ok, skill=skill)
     out = [line]
@@ -308,10 +314,16 @@ def resolve_pending_check(g: Game, die: int) -> tuple[bool, str]:
     g._pending_check = None
     mod = p["mod"]
     dc = p["dc"]
+    helped = bool(p.get("helped"))
+    if helped:
+        # the player's own die + one engine die, take the high (5e Help)
+        die = max(die, g.d20())
     total = die + mod
     ok = die >= 20 or (die > 1 and total >= dc)
     line = _render_check(p["actor"], p["ability"], die, mod, total,
                          dc, ok, p.get("skill", ""))
+    if helped:
+        line += "（🤝援助優勢）"
     g.ledger.add(p["actor"], "check", line, d20=die, mod=mod,
                  total=total, dc=dc, ok=ok, skill=p.get("skill", ""))
     out = [line]
@@ -754,7 +766,12 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         return ResolveResult([line])
 
     if it.action == "rest":
-        kind = it.args.get("kind", "short")
+        # kind: explicit args win; otherwise sniff the player's words
+        # (the engine owns this, so it applies on every path)
+        raw_all = f"{it.raw or ''} {it.utterance or ''}"
+        kind = it.args.get("kind") or ("long" if re.search(
+            r"長休|长休|long\s*rest|全休|過夜|过夜", raw_all, re.I)
+            else "short")
         lines = []
         for name, e in g.party.items():
             lvl = int(e.get("level", 1))
@@ -908,6 +925,37 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
             target = npc["name"]
             effect = {"kind": "insight", "target": npc["name"]}
         elif sk == "stealth":
+            # v5 seed 4: GROUP stealth when the player says 我哋/大家 —
+            # everyone rolls, half+ succeed = the whole party slips in
+            raw = f"{it.raw or ''}{it.utterance or ''}"
+            if re.search(r"我哋|我地|大家|全隊|全部人", raw):
+                lines = [f"🌫 **團體潛行**——全隊一起隱蔽（過半成功＝全隊成功）"]
+                rolls = []
+                for n in g.party:
+                    if not g.alive(n):
+                        continue
+                    mod = total_mod(g.party[n], "DEX", "stealth", "check")
+                    d = g.d20()
+                    ok = d >= 20 or (d > 1 and d + mod >= dc)
+                    rolls.append(ok)
+                    lines.append(f"　🎲 {n} DEX（潛行）：d20({d}){mod:+d} "
+                                 f"vs DC {dc} → {'✅' if ok else '❌'}")
+                    g.ledger.add(n, "check",
+                                 f"{n} 團體潛行 d20={d} → "
+                                 f"{'成功' if ok else '失敗'}",
+                                 d20=d, ok=ok, skill="stealth", group=True)
+                if rolls and rolls.count(True) * 2 >= len(rolls):
+                    if not isinstance(getattr(g, "_stealth", None), dict):
+                        g._stealth = {}
+                    for n in g.party:
+                        if g.alive(n):
+                            g._stealth[n] = True
+                    lines.append("🌫 全隊藏進陰影——各人的下一次攻擊有優勢")
+                else:
+                    lines.append("❌ 有人踩到枯枝——潛行失敗")
+                if g.combat.active:
+                    lines += _post_rotation(g)
+                return ResolveResult(lines)
             effect = {"kind": "stealth"}
         elif sk == "animal handling":
             npc = _find_npc(g, target)
@@ -954,6 +1002,25 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
             ab = "STR"
         ok, line = ability_check(g, actor, ab, 13, sk, auto=False)
         return ResolveResult([line])
+
+    if it.action == "help":
+        # v5 seed 4 — the 5e Help action: the aided character's NEXT
+        # check (engine-rolled OR their own /roll settle) takes the
+        # higher of two dice, visibly
+        tgt = it.target or ""
+        hit = next((n for n in g.party if tgt in n or n in tgt), "")
+        if not hit:
+            return ResolveResult(
+                [f"❓ 幫助誰？沒有角色「{tgt}」"], accepted=False)
+        if not isinstance(getattr(g, "_help_check", None), dict):
+            g._help_check = {}
+        g._help_check[hit] = True
+        g.ledger.add(actor, "help", f"{actor} 協助 {hit}", target=hit)
+        lines = [f"🤝 {actor} 幫 {hit} 打下手——"
+                 f"{hit} 的下一次檢定擲兩顆取高"]
+        if g.combat.active:
+            lines += _post_rotation(g)
+        return ResolveResult(lines)
 
     if it.action == "pass":
         g.ledger.add(actor, "pass", f"{actor} 選擇等待")
