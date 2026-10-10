@@ -1,6 +1,6 @@
 # V4 Summary — Engine-Driven Architecture (Current)
 
-> Version: v4 (active) · Updated: 2026-10-10
+> Version: v4 (active) · Updated: 2026-10-11
 > Architecture: engine does 70% (rules, state, combat, dice), LLM does 30%
 > (reading intent, writing prose). Game fully playable without any LLM.
 > Full v1→v4 evolution: see `EVOLUTION.md`
@@ -66,7 +66,8 @@ action definition table.
 | `/combat` | Player picks action → engine rolls immediately | Consent by selection |
 | `/explore` (check) | Engine shows check card → player `/roll d20` → engine settles | Player rolls |
 | `/explore` (take) | Engine moves ground item to inventory (no roll needed) | — |
-| `/explore` (talk NPC) | Friendly: no check. Hostile: CHA check card | Player rolls |
+| `/explore` (talk NPC) | Friendly: no check. Else: social skill check card | Player rolls |
+| `/explore` (skill) | Skill check card → player `/roll d20` → effect applies | Player rolls |
 | `/explore` (claim) | "我升到99級" → narrator responds in-character, engine denies | — |
 
 ## 5. Core Modules (v4/)
@@ -84,7 +85,7 @@ action definition table.
 | `guards.py` | v3 defenses: placeholders, scrubbing, repetition, s2t |
 | `service.py` | Orchestration, per-channel games, persistence |
 
-## 6. Actions (15)
+## 6. Actions (16)
 
 | Action | Trigger | Engine behaviour |
 |---|---|---|
@@ -93,16 +94,49 @@ action definition table.
 | `move` | /explore (去/go) | Scene change + encounter check |
 | `use` | /combat, /explore | Apply item (potions heal, etc.) |
 | `cast` | /combat, /explore | Consume spell slot, narrate effect |
-| `talk` | /explore | NPC check (CHA if hostile), narrator voices NPC |
-| `search` | /explore (搜索) | WIS check → reveal hidden items |
+| `talk` | /explore | Social check (skill-aware), disposition moves, narrator voices NPC |
+| `skill` | /combat (技能), /explore | Named skill check with mechanical effect (below) |
+| `search` | /explore (搜索) | WIS(perception) check → reveal hidden items |
 | `creative` | /explore (自創) | Ability check for improvised method |
 | `claim` | /explore (我升到99級) | Narrator responds, engine denies |
 | `meta` | /explore (目標/感受) | Narrator responds, scene context shown |
 | `chat` | plain text | Silently ignored (table talk) |
 | `rest` | /explore (休息) | Short: hit dice. Long: full restore |
 | `give` | /give | Transfer item between party members |
-| `check` | /explore (檢定) | Ability check with player roll |
+| `check` | /explore (檢定) | Ability check; trailing skill word adds proficiency |
 | `pass` | /explore (等待) | Skip turn (combat) |
+
+## 6b. The 18-Skill System (all wired)
+
+Defined in `engine/charlib.py` (`SKILL_ABILITY`, `CORE_SKILLS`,
+`SKILL_LABEL`); proficiency applied by `engine/checks.total_mod`.
+Triggered three ways — no LLM decides outcomes:
+
+1. **`/explore` freeform** — digestor maps Cantonese phrasing to a skill
+   （匿埋→stealth、嚇佢→intimidation、包紮→medicine、爬牆→athletics…）
+2. **`/combat` → ✨技能** — dropdown lists all 18, ★ = class-proficient
+3. **`/inventory`** — full sheet grouped by ability with ★ marks
+
+Mechanical effects (engine-owned facts the narrator dramatizes):
+
+| Skill | Effect on success |
+|---|---|
+| stealth | Unseen attacker: next attack rolls with advantage (one-shot) |
+| insight | Reveals NPC's true disposition + one thing they know |
+| medicine (DC 10) | Stabilizes a downed ally → HP 1, back on their feet |
+| perception / investigation | Reveals the scene's hidden items |
+| animal handling | Calms a creature: disposition +2 steps |
+| persuasion / deception / intimidation / performance | NPC disposition +1 step (intimidation adds fear) |
+| arcana / history / nature / religion | Knowledge fact gated by the check |
+| athletics / acrobatics / sleight of hand / survival | Contextual check (climb/balance/pick/track) |
+
+Social ladder (engine-owned): `hostile → suspicious → wary → neutral →
+negotiating → friendly → allied`. `talk` picks DC from disposition +
+skill; success steps the NPC up — the LLM only voices it.
+
+**Player dice**: `/explore` skills create a pending check card settled by
+the player's own `/roll d20` (effects apply at settle time — either path,
+exactly once). `/combat` skills auto-roll and burn the combat turn.
 
 ## 7. Guards (v3 Lessons Applied)
 

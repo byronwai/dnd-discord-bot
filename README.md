@@ -57,6 +57,17 @@ python v4/cli.py
 
 **Plain text** = table talk (silently ignored, no reaction, no reply)
 
+## The 18 Skills
+
+All SRD skills are wired into the engine (defined in `engine/charlib.py`,
+proficiency per class in `CORE_SKILLS`). Describe the action in `/explore`
+— 匿埋（潛行）、嚇佢（恐嚇）、包紮（醫藥）、爬牆（運動）— or pick from
+`/combat` → ✨技能 (★ = proficient). Engine effects on success:
+stealth → next attack with advantage · insight → read an NPC's true
+attitude · medicine → revive a downed ally · perception/investigation →
+find hidden items · social skills → move NPC disposition up the ladder.
+`/inventory` shows each character's full skill sheet.
+
 ## Design Principles
 
 1. **Engine decides, model narrates** — the LLM has no write path to game

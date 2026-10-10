@@ -205,8 +205,12 @@ class V4Service:
             # pass NPC knowledge constraints if this was a talk turn
             npc_knows, npc_name = None, ""
             for e in g.ledger.entries[idx0:]:
-                if e.kind == "talk" and e.data.get("npc"):
+                if e.kind in ("talk", "insight") and e.data.get("npc"):
                     npc_name = e.data["npc"]
+                    if e.kind == "insight" and e.data.get("knows"):
+                        # the engine already picked what insight reveals
+                        npc_knows = e.data["knows"]
+                        break
                     for n in g.world.here.npcs:
                         if n["name"] == npc_name:
                             npc_knows = n.get("knows", [])

@@ -43,6 +43,12 @@ HELP_TEXT = """🎲 **v4 引擎指令 / Commands**（11 個）
 　· action：⚔️攻擊 🎒物品 ✨技能 🛡防禦 🏃撤退 👁觀察
 　· 範例：`/combat action:攻擊 target:哥布林① move:詛咒木杖`
 
+**18 項技能 / Skills**（`/inventory` 查看熟練項）
+`/explore` 直接描述即可：匿埋（潛行）、嚇佢（恐嚇）、睇穿佢（洞察）、
+包紮（醫藥）、爬牆（運動）…引擎自動選技能＋熟練加值擲骰。
+技能效果：潛行→下擊有優勢；洞察→看穿 NPC 真實態度；醫藥→救醒倒地隊友；
+察覺/調查→搜出隱藏物；社交（說服/欺瞞/恐嚇/表演）→改變 NPC 態度。
+
 `/roll [expr]` — 擲骰（`/roll d20`、`/roll 2d6+3`、`/roll adv`）
 
 `/give <item> [to]` — 把物品給隊友
@@ -238,9 +244,38 @@ class DiscordBot(discord.Client):
 
         # ---- autocomplete helpers ----
 
-        async def combat_target_ac(interaction, current: str):
-            cid = str(interaction.channel_id)
+        async def skill_ac(interaction, current: str):
+            """The 18 skills — proficient (class core) ones starred first."""
             g = svc._v4_service(str(interaction.channel_id)).game
+            char = _filled_param(interaction, "character")
+            if not char:
+                char = next((n for n, v in g.party.items()
+                             if isinstance(v, dict)
+                             and str(v.get("owner_id", ""))
+                             == str(interaction.user.id)), "")
+            from engine.charlib import (CORE_SKILLS, SKILL_ABILITY,
+                                        SKILL_LABEL)
+            prof = set(CORE_SKILLS.get(
+                g.party.get(char, {}).get("occupation", ""), []))
+            q = (current or "").strip().lower()
+            out = []
+            for sk, ab in SKILL_ABILITY.items():
+                star = "★" if sk in prof else ""
+                label = f"{star}{SKILL_LABEL[sk]} {sk}（{ab}）"
+                if not q or q in label.lower() or q in sk:
+                    out.append(app_commands.Choice(name=label[:100],
+                                                   value=SKILL_LABEL[sk]))
+            out.sort(key=lambda c: not c.name.startswith("★"))
+            return out[:25]
+
+        async def combat_target_ac(interaction, current: str):
+            g = svc._v4_service(str(interaction.channel_id)).game
+            # the picked action decides what "target" means
+            act = _filled_param(interaction, "action")
+            if act == "skill":
+                return await skill_ac(interaction, current)
+            if act == "item":
+                return await item_ac(interaction, current)
             entries = []
             for name, foe in g.enemies.items():
                 if foe.dead:
@@ -416,7 +451,7 @@ class DiscordBot(discord.Client):
             elif act == "item":
                 text = f"{char} 使用 {target}"  # target dropdown lists items
             elif act == "skill":
-                text = f"{char} 施展 {target}" + (f" 於 {move}" if move else "")
+                text = f"{char} 技能 {target}" + (f" 於 {move}" if move else "")
             elif act == "defend":
                 text = f"{char} 防禦"
             elif act == "escape":
@@ -463,6 +498,21 @@ class DiscordBot(discord.Client):
                 lines.append("**法術格 / Spell Slots**")
                 lines.append("  " + " · ".join(
                     f"L{k} {v}" for k, v in slots.items()))
+            # skills: the 18 SRD skills, proficiency starred
+            from engine.charlib import (CORE_SKILLS, SKILL_ABILITY,
+                                        SKILL_LABEL)
+            prof = set(CORE_SKILLS.get(e.get("occupation", ""), []))
+            lines.append("")
+            lines.append(f"**技能 / Skills**（★＝熟練，共 {len(prof)} 項）")
+            by_ab = {}
+            for sk, ab in SKILL_ABILITY.items():
+                by_ab.setdefault(ab, []).append(sk)
+            for ab in ("STR", "DEX", "INT", "WIS", "CHA"):
+                row = " · ".join(
+                    ("★" if s in prof else "") + SKILL_LABEL[s]
+                    for s in by_ab.get(ab, []))
+                lines.append(f"  {ab}：{row}")
+            lines.append("　　（用 `/explore` 描述動作，或 `/combat` → 技能）")
             # moves
             from engine.moves import compute_attack_moves, \
                 DMEngine
@@ -670,7 +720,7 @@ class DiscordBot(discord.Client):
             elif act == "item":
                 text = f"{character} 使用 {target}"
             elif act == "skill":
-                text = f"{character} 施展 {target}"
+                text = f"{character} 技能 {target}"
             elif act == "defend":
                 text = f"{character} 防禦"
             elif act == "escape":

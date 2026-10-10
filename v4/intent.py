@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 # canonical action vocabulary the engine understands
 ACTIONS = ("attack", "move", "use", "cast", "talk", "search",
            "rest", "give", "check", "pass", "creative", "chat",
-           "take", "claim", "meta")
+           "take", "claim", "meta", "skill")
 
 _VERBS = {
     "attack": ("攻擊", "打", "劈", "斬", "砍", "揼", "踢", "篤", "射",
@@ -26,6 +26,7 @@ _VERBS = {
     "give": ("給", "give"),
     "check": ("檢定", "骰", "roll", "check"),
     "pass": ("等待", "跳過", "pass", "wait"),
+    "skill": ("技能", "skill", "使出"),
 }
 
 # Cantonese aspect markers and particles to strip before verb matching
@@ -106,4 +107,11 @@ def parse_command(text: str, party_names=()) -> Intent | None:
         it.args["kind"] = "long" if rest in ("長休", "long") else "short"
     elif action == "check":
         it.ability = rest
+    elif action == "skill":
+        # 「技能 潛行」／「技能 洞察 船長」— skill word (+ optional target)
+        parts = rest.split(None, 1) if rest else []
+        if len(parts) == 2:
+            it.skill, it.target = parts
+        elif parts:
+            it.skill = parts[0]
     return it

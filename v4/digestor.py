@@ -33,10 +33,22 @@ class Digestor:
             "用 creative。\n"
             "take   ＝拾起／拿走場景中嘅物件（執、撿、攞、pick up）。\n"
             "move   ＝去另一個地方（去、前往、go to）。\n"
-            "talk   ＝同 NPC 說話或提問（傾計、問、ask）。\n"
+            "talk   ＝同 NPC 說話或提問（傾計、問、ask）。想呃佢填 skill="
+            "deception，想嚇佢填 skill=intimidation，想遊說填 skill="
+            "persuasion。\n"
             "search ＝搜索、調查周圍環境。\n"
             "use    ＝使用身上嘅物品。\n"
             "cast   ＝施展法術或技能。\n"
+            "skill  ＝主動使用一項 D&D 技能（冇施法成分嗰啲）。認住意思：\n"
+            "         匿埋／收埋／靜靜雞＝stealth；睇穿佢講大話／睇下佢想"
+            "點＝insight；幫佢包紮／急救＝medicine；爬牆／爆門／游水＝"
+            "athletics；平衡／翻滾／跳＝acrobatics；偷嘢／解鎖＝sleight of "
+            "hand；跟蹤跡／搵食搵水＝survival；研究符文／魔法物件＝arcana；"
+            "回想背景＝history；認動植物＝nature；認神祇儀式＝religion；"
+            "安撫動物＝animal handling；留意四周＝perception；搜證推理＝"
+            "investigation；講大話呃人＝deception；惡言威嚇＝intimidation；"
+            "唱歌演戲＝performance；講道理打動人＝persuasion；鬥力角力＝"
+            "athletics。\n"
             "creative＝自創花招（對物件或環境嘅非標準動作）。\n"
             "claim  ＝玩家宣稱自己得到能力、等級、物品（「我升到99級」）"
             "——唔係真嘅動作。\n"
@@ -48,8 +60,13 @@ class Digestor:
             f"（通道: {'、'.join(exits) if exits else '無'}）\n"
             + tgt_line +
             '欄位: {"paraphrase","action","actor","target","item",'
-            '"spell","destination","utterance"} — '
-            "paraphrase 係書面中文重述；用不到嘅欄位填空字串。\n\n"
+            '"spell","destination","utterance","skill"} — '
+            "paraphrase 係書面中文重述；skill 填英文技能名"
+            "（stealth/insight/medicine/athletics/acrobatics/"
+            "sleight of hand/survival/arcana/history/nature/religion/"
+            "animal handling/perception/investigation/deception/"
+            "intimidation/performance/persuasion）；"
+            "用不到嘅欄位填空字串。\n\n"
             "範例（真實粵語＋混英文）：\n"
             '「我用劍劈小明」→ {"paraphrase":"用劍砍小明","action":"attack",'
             '"actor":"","target":"小明","item":"劍"}\n'
@@ -67,7 +84,17 @@ class Digestor:
             '"utterance":"升到99級"}\n'
             '「同老闆傾下計」→ {"paraphrase":"和老闆交談","action":"talk",'
             '"target":"老闆"}\n'
-            '「周圍望下」→ {"paraphrase":"四處查看","action":"search"}\n\n'
+            '「周圍望下」→ {"paraphrase":"四處查看","action":"search"}\n'
+            '「我匿埋喺暗處」→ {"paraphrase":"躲進陰影","action":"skill",'
+            '"skill":"stealth"}\n'
+            '「我嚇下個店主」→ {"paraphrase":"威嚇店主","action":"skill",'
+            '"skill":"intimidation","target":"店主"}\n'
+            '「睇下船長有冇講大話」→ {"paraphrase":"觀察船長是否說謊",'
+            '"action":"skill","skill":"insight","target":"船長"}\n'
+            '「快啲幫依思包紮」→ {"paraphrase":"替依思急救包紮",'
+            '"action":"skill","skill":"medicine","target":"依思"}\n'
+            '「我爬上去嗰道牆」→ {"paraphrase":"爬上那道牆","action":"skill",'
+            '"skill":"athletics"}\n\n'
             "拿不準時，偏向遊戲動作（玩家的行動不能被漏掉）。\n"
             f'玩家輸入:「{text}」→')
         try:
@@ -91,6 +118,7 @@ class Digestor:
                 spell=(data.get("spell") or "").strip(),
                 destination=(data.get("destination") or "").strip(),
                 utterance=(data.get("utterance") or "").strip(),
+                skill=(data.get("skill") or "").strip(),
                 raw=text,
                 confidence=max(0.0, min(1.0, float(data.get("confidence") or 0.8))))
         except Exception:

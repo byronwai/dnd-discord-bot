@@ -7,12 +7,19 @@ through the Game. The narrator (P2) will turn ledger entries into prose.
 
 import re
 
-from engine.charlib import slots_for
-from engine.checks import total_mod
+from engine.charlib import SKILL_ABILITY, normalize_skill, slots_for
+from engine.checks import parse_check_ability, total_mod
 from engine.moves import compute_attack_moves, move_spell_level
 from engine.dice import roll_expr
 
 MOVE_SPELL_LEVEL = move_spell_level
+
+# social ladder: index rises as an NPC warms up (engine-owned fact the
+# narrator voices — the LLM may never move disposition itself)
+_DISPO = ["hostile", "suspicious", "wary", "neutral",
+          "negotiating", "friendly", "allied"]
+# the four social skills a `talk` may ride on (SRD CHA family)
+_SOCIAL = ("persuasion", "deception", "intimidation", "performance")
 
 from .intent import Intent
 from .turn import Game
@@ -58,6 +65,121 @@ class ResolveResult:
         self.confirm = confirm       # Intent needing player confirmation
 
 
+# ---------- skill machinery (all 18 SRD skills) ----------
+
+def _dispo_step(disp: str, up: int = 1) -> str:
+    i = _DISPO.index(disp) if disp in _DISPO else 3
+    return _DISPO[max(0, min(len(_DISPO) - 1, i + up))]
+
+
+def _dispo_zh(disp: str) -> str:
+    return {"hostile": "敵視", "suspicious": "起疑", "wary": "戒備",
+            "neutral": "中立", "negotiating": "願意商量",
+            "friendly": "友善", "allied": "結盟"}.get(disp, disp)
+
+
+def _find_npc(g: Game, target: str):
+    """Scene NPC whose name fuzzy-matches the target string."""
+    t = (target or "").strip()
+    if not t:
+        return None
+    for n in g.world.here.npcs:
+        if t in n["name"] or n["name"] in t:
+            return n
+    return None
+
+
+def _find_npc_in_text(g: Game, text: str):
+    """NPC mentioned anywhere in free text（「船長幫幫手啦」→ 老船長）.
+    Falls back to 2-char windows of the NPC name — Chinese names are
+    short and players rarely type the full form."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    for n in g.world.here.npcs:
+        name = n["name"]
+        if name in t:
+            return n
+        for i in range(len(name) - 1):
+            if name[i:i + 2] in t:
+                return n
+    return None
+
+
+def _apply_check_effect(g: Game, actor: str, effect: dict | None,
+                        ok: bool, lines: list[str]) -> None:
+    """Mechanical outcome of a settled check. Runs whether the die came
+    from the engine (auto) or the player's own /roll (pending path)."""
+    if not effect or not ok:
+        return
+    kind = effect.get("kind", "")
+    if kind == "search":
+        s = g.world.here
+        if s.hidden_items:
+            for name, qty in s.hidden_items:
+                g.give_item(actor, name, qty)
+                lines.append(f"🎒 {actor} 搜到 **{name}×{qty}**")
+            g.ledger.add(actor, "item", f"{actor} 搜到了 {s.hidden_items}")
+            s.hidden_items = []
+        else:
+            lines.append("（仔細搜過，沒有特別的發現）")
+    elif kind == "medicine":
+        tgt = effect.get("target", "")
+        e = g.party.get(tgt)
+        if e is not None and not g.alive(tgt):
+            e["hp_now"] = 1
+            lines.append(f"🩹 {tgt} 傷勢穩定，甦醒過來（HP 1）")
+            g.ledger.add(actor, "heal", f"{actor} 救醒了 {tgt}",
+                         target=tgt)
+    elif kind == "insight":
+        npc = _find_npc(g, effect.get("target", ""))
+        if npc is not None:
+            knows = npc.get("knows", [])
+            fact = (f"{actor} 看穿了 {npc['name']} 的真實態度："
+                    f"{_dispo_zh(npc.get('disposition', 'neutral'))}")
+            if knows:
+                fact += f"；並察覺對方知道「{knows[0]}」"
+            lines.append(f"👁 {fact}")
+            g.ledger.add(actor, "insight", fact, npc=npc["name"],
+                         disposition=npc.get("disposition", "neutral"),
+                         knows=knows[:3])
+    elif kind == "stealth":
+        if not hasattr(g, "_stealth") or not isinstance(g._stealth, dict):
+            g._stealth = {}
+        g._stealth[actor] = True
+        lines.append(f"🌫 {actor} 藏進陰影——下一次攻擊有優勢")
+        g.ledger.add(actor, "skill", f"{actor} 潛行成功，未被發現",
+                     skill="stealth")
+    elif kind == "animal":
+        npc = _find_npc(g, effect.get("target", ""))
+        if npc is not None:
+            old = npc.get("disposition", "neutral")
+            npc["disposition"] = _dispo_step(old, 2)
+            lines.append(f"🐎 {npc['name']} 冷靜下來了"
+                         f"（{_dispo_zh(old)} → {_dispo_zh(npc['disposition'])}）")
+            g.ledger.add(actor, "skill",
+                         f"{actor} 安撫了 {npc['name']}",
+                         skill="animal handling", npc=npc["name"])
+    elif kind == "social":
+        npc = _find_npc(g, effect.get("target", ""))
+        if npc is not None:
+            old = npc.get("disposition", "neutral")
+            skill = effect.get("skill", "persuasion")
+            if old in ("friendly", "allied"):
+                note = f"{npc['name']} 本來就站在你們一邊"
+            else:
+                npc["disposition"] = _dispo_step(old, 1)
+                note = (f"{npc['name']} 的態度軟化"
+                        f"（{_dispo_zh(old)} → {_dispo_zh(npc['disposition'])}）")
+                if skill == "intimidation":
+                    note += "——但眼神裡有一絲畏懼"
+            lines.append(f"🤝 {note}")
+            g.ledger.add(actor, "talk",
+                         f"{actor} 的{skill}奏效：{note}",
+                         npc=npc["name"], skill=skill, ok=True,
+                         disposition=npc["disposition"])
+
+
 # ---------- validation ----------
 
 def validate(g: Game, it: Intent) -> str | None:
@@ -98,36 +220,44 @@ def validate(g: Game, it: Intent) -> str | None:
 # ---------- resolution ----------
 
 def _render_check(name: str, ability: str, d20: int, mod: int, total: int,
-                  dc: int, ok: bool) -> str:
+                  dc: int, ok: bool, skill: str = "") -> str:
+    from engine.charlib import SKILL_LABEL
     crit = "（天然 20！）" if d20 >= 20 else ("（天然 1！）" if d20 <= 1 else "")
-    return (f"🎲 {name} {ability} 檢定：d20({d20}){mod:+d} = {total} "
+    sk = (f"（{SKILL_LABEL.get(skill, skill)}）" if skill else "")
+    return (f"🎲 {name} {ability}{sk} 檢定：d20({d20}){mod:+d} = {total} "
             f"vs DC {dc} → {'✅ 成功' if ok else '❌ 失敗'}{crit}")
 
 
 def ability_check(g: Game, actor: str, ability: str, dc: int,
                   skill: str = "",
-                  auto: bool = True) -> tuple[bool, str] | None:
+                  auto: bool = True,
+                  effect: dict | None = None) -> tuple[bool, str] | None:
     """Roll a check. auto=True rolls immediately (combat/structured).
     auto=False shows a pending check card and waits for /roll —
-    restoring v3's player-dice agency for /explore actions."""
+    restoring v3's player-dice agency for /explore actions.
+    effect: mechanical outcome ({kind, target, skill}) applied when the
+    check settles — on either path, exactly once."""
     mod = total_mod(g.party[actor], ability, skill, "check")
     if not auto:
+        from engine.charlib import SKILL_LABEL
         need = max(1, dc - mod)
         g._pending_check = {
             "actor": actor, "ability": ability, "skill": skill,
-            "dc": dc, "mod": mod}
+            "dc": dc, "mod": mod, "effect": effect or None}
         line = (f"🎯 {actor} {ability}"
-                + (f"（{skill}）" if skill else "")
+                + (f"（{SKILL_LABEL.get(skill, skill)}）" if skill else "")
                 + f" 檢定 vs DC {dc}（需骰 ≥ {need}）"
                 + f"\n👉 用 `/roll d20` 擲骰（修正值 {mod:+d} 自動套用）")
         return None, line
     d = g.d20()
     total = d + mod
     ok = d >= 20 or (d > 1 and total >= dc)
-    line = _render_check(actor, ability, d, mod, total, dc, ok)
+    line = _render_check(actor, ability, d, mod, total, dc, ok, skill)
     g.ledger.add(actor, "check", line, d20=d, mod=mod, total=total,
-                 dc=dc, ok=ok)
-    return ok, line
+                 dc=dc, ok=ok, skill=skill)
+    out = [line]
+    _apply_check_effect(g, actor, effect, ok, out)
+    return ok, "\n".join(out)
 
 
 def resolve_pending_check(g: Game, die: int) -> tuple[bool, str]:
@@ -141,10 +271,12 @@ def resolve_pending_check(g: Game, die: int) -> tuple[bool, str]:
     total = die + mod
     ok = die >= 20 or (die > 1 and total >= dc)
     line = _render_check(p["actor"], p["ability"], die, mod, total,
-                         dc, ok)
+                         dc, ok, p.get("skill", ""))
     g.ledger.add(p["actor"], "check", line, d20=die, mod=mod,
-                 total=total, dc=dc, ok=ok)
-    return ok, line
+                 total=total, dc=dc, ok=ok, skill=p.get("skill", ""))
+    out = [line]
+    _apply_check_effect(g, p["actor"], p.get("effect"), ok, out)
+    return ok, "\n".join(out)
 
 
 def _attack(g: Game, actor: str, target: str, move: str = "") -> ResolveResult:
@@ -175,7 +307,15 @@ def _attack(g: Game, actor: str, target: str, move: str = "") -> ResolveResult:
         return ResolveResult([f"找不到目標「{target}」"], accepted=False)
     ac = foe.ac if foe else g.ac_of(tgt_char)
     bonus = total_mod(g.party[actor], ability, kind="attack")
+    # successful stealth grants one unseen-attacker attack (SRD: advantage)
+    stealthed = bool(getattr(g, "_stealth", {}).pop(actor, False)) \
+        if isinstance(getattr(g, "_stealth", None), dict) else False
     d = g.d20()
+    adv_note = ""
+    if stealthed:
+        d2 = g.d20()
+        adv_note = f"（潛行優勢：{d}/{d2} 取高）"
+        d = max(d, d2)
     total = d + bonus
     crit = d >= 20
     hit = crit or (d > 1 and total >= ac)
@@ -183,6 +323,7 @@ def _attack(g: Game, actor: str, target: str, move: str = "") -> ResolveResult:
     mv_txt = f"（{move}）" if move else ""
     line = (f"🎲 {actor} 攻擊 {tname}{mv_txt}：d20({d}){bonus:+d} = {total} "
             f"vs AC {ac} → {'✅ 命中' if hit else '❌ 未命中'}"
+            + adv_note
             + ("（天然 20：暴擊！）" if crit else ""))
     lines.append(line)
     g.ledger.add(actor, "attack", line, d20=d, total=total, ac=ac, hit=hit,
@@ -392,17 +533,10 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
 
     if it.action == "search":
         s = g.world.here
-        ok, line = ability_check(g, actor, "WIS", s.search_dc, "perception", auto=False)
-        lines = [line]
-        if ok and s.hidden_items:
-            for name, qty in s.hidden_items:
-                g.give_item(actor, name, qty)
-                lines.append(f"🎒 {actor} 搜到 **{name}×{qty}**")
-            g.ledger.add(actor, "item", f"{actor} 搜到了 {s.hidden_items}")
-            s.hidden_items = []
-        elif ok:
-            lines.append("（仔細搜過，沒有特別的發現）")
-        return ResolveResult(lines)
+        _, line = ability_check(g, actor, "WIS", s.search_dc,
+                                "perception", auto=False,
+                                effect={"kind": "search"})
+        return ResolveResult([line])
 
     if it.action == "rest":
         kind = it.args.get("kind", "short")
@@ -450,36 +584,131 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
 
     if it.action in ("talk",):
         # addressing a scene NPC: a real social exchange — the engine picks
-        # the difficulty from disposition, the narrator voices the reply
+        # the difficulty from disposition + social skill, success moves the
+        # NPC's disposition (a fact), the narrator voices the reply
         npc = None
         if it.target:
-            for n in g.world.here.npcs:
-                if it.target in n["name"] or n["name"] in it.target:
-                    npc = n
-                    break
+            npc = _find_npc(g, it.target)
+        if npc is None:
+            # deterministic path puts everything in the utterance —
+            # 「講 船長幫幫手啦」: scan it for a scene NPC's name
+            npc = _find_npc_in_text(g, it.utterance)
         if npc is not None:
             disp = npc.get("disposition", "neutral")
-            lines = [f"🗣 {actor} 向 {npc['name']}：{it.utterance}"]
+            from engine.charlib import SKILL_LABEL
+            skill = it.skill if it.skill in _SOCIAL else "persuasion"
+            sk_zh = SKILL_LABEL.get(skill, skill)
+            lines = [f"🗣 {actor} 向 {npc['name']}（{sk_zh}）：{it.utterance}"]
             if disp in ("hostile", "suspicious"):
-                ok, line = ability_check(g, actor, "CHA", 14, "persuasion", auto=False)
-                lines.append(line)
+                dc = 14 if skill == "persuasion" else 13
             elif disp in ("negotiating", "neutral", "wary"):
-                ok, line = ability_check(g, actor, "CHA", 12, "persuasion", auto=False)
-                lines.append(line)
+                dc = 12 if skill == "persuasion" else 11
             else:  # friendly/allied: no gate, the NPC engages willingly
+                dc = 0
+            if dc:
+                ok, line = ability_check(g, actor, "CHA", dc, skill,
+                                         auto=False,
+                                         effect={"kind": "social",
+                                                 "target": npc["name"],
+                                                 "skill": skill})
+                lines.append(line)
+            else:
                 ok = True
+                lines.append(f"🤝 {npc['name']} 樂意回應")
             g.ledger.add(actor, "talk",
-                         f"{actor} 向 {npc['name']}：{it.utterance}"
-                         + ("（交談順利）" if ok else "（對方興趣缺缺）"),
+                         f"{actor} 向 {npc['name']}：{it.utterance}",
                          utterance=it.utterance, npc=npc["name"], ok=ok,
-                         disposition=disp)
+                         disposition=disp, skill=skill)
             return ResolveResult(lines)
         g.ledger.add(actor, "talk", f"{actor}：「{it.utterance}」",
                      utterance=it.utterance)
         return ResolveResult([f"💬 {actor}：「{it.utterance}」"])
 
+    if it.action == "skill":
+        # a named skill attempt: normalize the skill word, pick a DC and
+        # the mechanical effect from the skill + context (never the LLM)
+        ab, sk = normalize_skill(it.skill or it.spell or it.utterance)
+        if not sk:
+            return ResolveResult(
+                [f"❓ 未知的技能「{it.skill or it.spell or '?'}」。"
+                 "可用：潛行／洞察／醫藥／運動／特技／調查／察覺／求生／"
+                 "奧秘／歷史／自然／宗教／馴獸／欺瞞／恐嚇／表演／說服／手技"],
+                accepted=False)
+        target = it.target
+        dc = 12
+        effect = None
+        if sk in ("perception", "investigation"):
+            dc = g.world.here.search_dc
+            effect = {"kind": "search"}
+        elif sk == "medicine":
+            dc = 10
+            foe, tgt_char = resolve_target(g, target)
+            if tgt_char is None or g.alive(tgt_char):
+                # no downed target named: pick the most wounded ally
+                hurt = [n for n in g.party if not g.alive(n)] or [
+                    n for n, e in g.party.items()
+                    if int(e["hp_now"]) < int(e["hp_max"])]
+                tgt_char = hurt[0] if hurt else actor
+            target = tgt_char
+            if not g.alive(tgt_char):
+                effect = {"kind": "medicine", "target": tgt_char}
+            else:
+                effect = None  # healing the walking is a healer's kit thing
+                dc = 12
+        elif sk == "insight":
+            npc = _find_npc(g, target)
+            if npc is None:
+                return ResolveResult(
+                    [f"❓ 洞悉需要一個對象——這裡的 NPC："
+                     + ("、".join(n["name"] for n in g.world.here.npcs)
+                        or "無")], accepted=False)
+            target = npc["name"]
+            effect = {"kind": "insight", "target": npc["name"]}
+        elif sk == "stealth":
+            effect = {"kind": "stealth"}
+        elif sk == "animal handling":
+            npc = _find_npc(g, target)
+            if npc is None:
+                return ResolveResult(
+                    [f"❓ 馴獸需要一個動物對象——這裡的 NPC："
+                     + ("、".join(n["name"] for n in g.world.here.npcs)
+                        or "無")], accepted=False)
+            target = npc["name"]
+            effect = {"kind": "animal", "target": npc["name"]}
+        elif sk in _SOCIAL:
+            # standalone social ploy without a talk utterance
+            npc = _find_npc(g, target) or (
+                g.world.here.npcs[0] if g.world.here.npcs else None)
+            if npc is None:
+                return ResolveResult(
+                    ["❓ 這裡沒有可以交涉的對象。"], accepted=False)
+            target = npc["name"]
+            effect = {"kind": "social", "target": npc["name"], "skill": sk}
+            dc = 13 if npc.get("disposition", "neutral") in \
+                ("hostile", "suspicious") else 11
+        # knowledge (arcana/history/nature/religion) and physical
+        # (athletics/acrobatics/sleight of hand/survival): a plain check —
+        # success is a fact the narrator dramatizes, failure adds nothing
+        # combat (/combat menu = structured consent) auto-rolls and burns
+        # the turn; /explore keeps the player-dice pending flow
+        in_combat = g.combat.active
+        _, line = ability_check(g, actor, ab, dc, sk, auto=in_combat,
+                                effect=effect)
+        g.ledger.add(actor, "skill",
+                     f"{actor} 使出 {sk}"
+                     + (f"（對 {target}）" if target else ""),
+                     skill=sk, target=target)
+        if in_combat:
+            _post_rotation(g)
+        return ResolveResult([line])
+
     if it.action == "check":
-        ok, line = ability_check(g, actor, it.ability or "STR", 13, auto=False)
+        # plain ability check; a trailing skill word upgrades it with
+        # proficiency（「檢定 洞察」→ WIS + insight proficiency）
+        ab, sk = parse_check_ability(it.ability or it.skill or "")
+        if not ab:
+            ab = "STR"
+        ok, line = ability_check(g, actor, ab, 13, sk, auto=False)
         return ResolveResult([line])
 
     if it.action == "pass":

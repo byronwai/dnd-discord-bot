@@ -69,10 +69,11 @@ META = {
                                   or "（空）")
                       for n, inv in g.inventory.items()],
     "moves": lambda g: [f"{n}: " + ", ".join(
-        m["name"] for m in __import__("engine.dm", fromlist=["x"])
-        .compute_attack_moves(e.get("occupation", ""), int(e.get("level", 1)),
-                              [("item", i, q) for i, q in g.inventory[n]],
-                              g.max_slot(n)))
+        m["name"] for m in
+        __import__("engine.moves", fromlist=["x"]).compute_attack_moves(
+            e.get("occupation", ""), int(e.get("level", 1)),
+            [("item", i, q) for i, q in g.inventory[n]],
+            g.max_slot(n)))
         for n, e in g.party.items()],
 }
 
@@ -121,6 +122,30 @@ def selftest() -> None:
     run("依思 go 月球")
     assert any("沒有通往" in x for x in L), L
     L.clear()
+
+    # ---- the 18-skill system -------------------------------------------
+    from v4.rules_core import resolve_pending_check as _rpc
+
+    # unknown skill is denied deterministically, with the valid list
+    run("依思 技能 飛天")
+    assert any("未知的技能" in x for x in L), L
+    L.clear()
+
+    # stealth: pending check -> PLAYER's own die -> effect applied
+    # (nat 20 always succeeds -> the unseen-attacker flag is set)
+    run("依思 技能 潛行")
+    ok, line = _rpc(g, 20)
+    assert ok and getattr(g, "_stealth", {}).get("依思"), L
+    assert "潛行" in line, line
+    L.clear()
+
+    # insight: reveals the NPC's true disposition as an engine fact
+    run("大力蕉 技能 洞察 老船長")
+    ok, line = _rpc(g, 20)
+    assert ok and any(e.kind == "insight" and e.data.get("npc") == "老船長"
+                      for e in g.ledger.entries), L
+    L.clear()
+    # --------------------------------------------------------------------
 
     # potion heals via SRD math and is consumed (out of combat: free order)
     g.party["依思"]["hp_now"] = 5  # deterministic setup for the heal assert

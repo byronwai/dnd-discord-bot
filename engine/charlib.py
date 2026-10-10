@@ -42,6 +42,16 @@ SKILL_ZH = {
     "表演": "performance", "說服": "persuasion",
 }
 
+# canonical zh display name per skill (for menus and sheets)
+SKILL_LABEL = {
+    "athletics": "運動", "acrobatics": "特技", "sleight of hand": "手技",
+    "stealth": "潛行", "arcana": "奧秘", "history": "歷史",
+    "investigation": "調查", "nature": "自然", "religion": "宗教",
+    "animal handling": "馴獸", "insight": "洞察", "medicine": "醫藥",
+    "perception": "察覺", "survival": "求生", "deception": "欺瞞",
+    "intimidation": "恐嚇", "performance": "表演", "persuasion": "說服",
+}
+
 # core skills per class (SRD quick-build picks — our house standard): a
 # check tagged with one of these applies the proficiency bonus
 CORE_SKILLS = {

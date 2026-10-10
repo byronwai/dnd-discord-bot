@@ -122,6 +122,18 @@ def render_hint(entry, game=None) -> str:
     if kind == "talk":
         return entry.text
 
+    if kind == "skill":
+        sk = d.get("skill", "")
+        tgt = d.get("target", "")
+        return (f"{actor} 運用{sk}"
+                + (f"應付 {tgt}" if tgt else "")
+                + "，全神貫注。")
+
+    if kind == "insight":
+        npc = d.get("npc", "對方")
+        return (f"{actor} 盯著 {npc} 的眼神與小動作，"
+                "讀出了掩飾不住的東西。")
+
 
 # ---- turn context: the v3 "every turn ends with a hook" guarantee ----
 
@@ -152,6 +164,8 @@ def suggested_actions(g, actor: str = "") -> list[str]:
             opts.append(f"面對 **{n['name']}**（敵對）")
         else:
             opts.append(f"和 **{n['name']}** 交談")
+        if disp not in ("friendly", "allied"):
+            opts.append(f"👁 用 **洞察** 看穿 {n['name']} 的真實態度")
     # exits with context
     for sid, label in list(s.exits.items())[:2]:
         dest = g.world.scenes.get(sid)
