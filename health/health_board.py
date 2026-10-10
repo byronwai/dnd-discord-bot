@@ -98,14 +98,48 @@ DM 每回合以繁體中文敘述 80–180 字，結尾給你鉤子或建議選�
 祝冒險愉快！有問題隨時 `/help` 🎲""",
 ]
 DIFFICULTY_ZH = {"easy": "新手", "normal": "標準", "hard": "困難"}
+# The tracked v3 game chat. The placeholder is REPLACED at startup by
+# resolve_game_chat(): GAME_CHANNEL_ID env override, else the newest
+# discord session row — no real channel id is ever hardcoded in source.
 CHAT_WHERE = "platform = 'discord' AND chat_id = '<CHANNEL_ID>'"
-SESSION_SQL = ("SELECT party, scene, difficulty, combat, pending_check "
-               "FROM sessions WHERE " + CHAT_WHERE)
-HEARTBEAT_SQL = "SELECT MAX(id), MAX(ts) FROM messages WHERE " + CHAT_WHERE
-LAST_REPLY_SQL = ("SELECT ts FROM messages WHERE " + CHAT_WHERE +
-                  " AND role = 'assistant' ORDER BY id DESC LIMIT 1")
-EVENTS_SQL = ("SELECT line FROM events WHERE " + CHAT_WHERE +
-              " ORDER BY id DESC LIMIT 3")
+SESSION_SQL = ""
+HEARTBEAT_SQL = ""
+LAST_REPLY_SQL = ""
+EVENTS_SQL = ""
+
+
+def resolve_game_chat(db_path: str) -> None:
+    """Pin the v3 game chat and (re)build the SQL filters from it."""
+    global CHAT_WHERE, SESSION_SQL, HEARTBEAT_SQL, LAST_REPLY_SQL, EVENTS_SQL
+    cid = os.environ.get("GAME_CHANNEL_ID", "").strip()
+    if not cid:
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True,
+                                   timeout=2.0)
+            try:
+                row = conn.execute(
+                    "SELECT chat_id FROM sessions WHERE platform = 'discord' "
+                    "ORDER BY rowid DESC LIMIT 1").fetchone()
+            finally:
+                conn.close()
+            cid = row[0] if row else ""
+        except sqlite3.Error as exc:
+            log.warning("could not read sessions for chat detection: %s", exc)
+    if not cid:
+        log.error("no GAME_CHANNEL_ID env and no discord session row — "
+                  "v3 board section stays disabled")
+        return
+    CHAT_WHERE = f"platform = 'discord' AND chat_id = '{cid}'"
+    SESSION_SQL = ("SELECT party, scene, difficulty, combat, pending_check "
+                   "FROM sessions WHERE " + CHAT_WHERE)
+    HEARTBEAT_SQL = "SELECT MAX(id), MAX(ts) FROM messages WHERE " + CHAT_WHERE
+    LAST_REPLY_SQL = ("SELECT ts FROM messages WHERE " + CHAT_WHERE +
+                      " AND role = 'assistant' ORDER BY id DESC LIMIT 1")
+    EVENTS_SQL = ("SELECT line FROM events WHERE " + CHAT_WHERE +
+                  " ORDER BY id DESC LIMIT 3")
+    log.info("tracking game chat %s", cid)
+
+
 STATE_FILE = Path(__file__).resolve().parent / "state.json"
 EVENT_POLL = 2            # seconds; cheap new-reply heartbeat
 FULL_REFRESH = 30.0       # seconds; fallback rebuild if a poll was missed
@@ -285,16 +319,16 @@ def read_new_v4_entries(path: str, cursor: int) -> tuple[int, list]:
     except (OSError, ValueError):
         return cursor, []
     if len(entries) < cursor:
-        cursor = 0  # the playground state was reset
+        cursor = 0  # this channel's state was reset
     new = entries[cursor:cursor + 15]
     return (cursor + len(new)), [
-        f"[v4 t{e.get('turn', '?')}][{e.get('kind', '?')}] "
+        f"[t{e.get('turn', '?')}][{e.get('kind', '?')}] "
         f"{e.get('actor', '?')}: {e.get('text', '')}" for e in new
         if e.get("kind") not in ("table",)]  # table talk = not game log
 
 
-def v4_summary(path: str) -> str:
-    """One compact debug block for the board message."""
+def v4_summary(path: str, label: str = "") -> str:
+    """One compact debug block per game for the board message."""
     try:
         with open(path, encoding="utf-8") as f:
             blob = json.load(f)
@@ -303,7 +337,7 @@ def v4_summary(path: str) -> str:
     world = blob.get("world", {})
     cur = world.get("scenes", {}).get(world.get("current", ""), {})
     combat = blob.get("combat") or {}
-    lines = [f"🧪 v4 playground：{cur.get('name', '?')} · turn "
+    lines = [f"🧪 v4 {label or '遊戲'}：{cur.get('name', '?')} · turn "
              f"{blob.get('turn', 0)} · "
              + (f"戰鬥 R{combat.get('round', '?')}" if combat.get("order")
                 else "探索")]
@@ -410,9 +444,31 @@ class HealthBoardBot(discord.Client):
         self._task = None
         self.tree = app_commands.CommandTree(self)
         self._register_commands()
-        self.v4_path = os.path.join(os.path.dirname(os.path.abspath(db_path)),
-                                    "v4_state.json")
+        # v4 games are per-channel state files in the data dir
+        # (v4_state.json = legacy single-game playground)
+        self.data_dir = os.path.dirname(os.path.abspath(db_path))
         self.log_state = load_state()
+
+    def _v4_state_files(self) -> list[str]:
+        """Every v4 state file, most recently modified first."""
+        try:
+            files = [os.path.join(self.data_dir, f)
+                     for f in os.listdir(self.data_dir)
+                     if f.startswith("v4_state") and f.endswith(".json")]
+            return sorted(files, key=lambda p: os.path.getmtime(p),
+                          reverse=True)
+        except OSError:
+            return []
+
+    def _v4_label(self, path: str) -> str:
+        """v4_state_<channel_id>.json -> '#channel' (resolved) or a mention."""
+        stem = os.path.splitext(os.path.basename(path))[0]
+        cid = stem[len("v4_state_"):] if stem.startswith("v4_state_") else ""
+        if cid.isdigit():
+            ch = self.get_channel(int(cid))
+            return f"#{ch.name}" if getattr(ch, "name", None) \
+                else f"<#{cid}>"
+        return "playground"
 
     def _register_commands(self):
         @self.tree.command(name="moves",
@@ -537,15 +593,17 @@ class HealthBoardBot(discord.Client):
             return
         self._next_full = time.monotonic() + FULL_REFRESH
         content = render(*data[:7], time.monotonic() - self.started)
-        v4s = v4_summary(self.v4_path)
-        if v4s:
-            content += "\n" + v4s
+        blocks = [v4_summary(p, self._v4_label(p))
+                  for p in self._v4_state_files()[:3]]  # newest games
+        blocks = [b for b in blocks if b]
+        if blocks:
+            content += "\n" + "\n".join(blocks)
         await self._publish(content, bypass_throttle=reply_push)
         await self._push_logs()
 
     async def _push_logs(self):
-        """Debug portal: stream new engine facts (v3 events + v4 ledger)
-        into the channel as batched log messages."""
+        """Debug portal: stream new engine facts (v3 events + every v4
+        channel ledger) into the channel as batched log messages."""
         if self.channel is None:
             return
         # first run: park the cursors at the current head (no backlog flood)
@@ -561,18 +619,32 @@ class HealthBoardBot(discord.Client):
             except sqlite3.Error:
                 head = 0
             self.log_state["last_event_id"] = head
-        if "last_v4_len" not in self.log_state:
-            try:
-                with open(self.v4_path, encoding="utf-8") as f:
-                    self.log_state["last_v4_len"] = len(
-                        json.load(f).get("entries", []))
-            except (OSError, ValueError):
-                self.log_state["last_v4_len"] = 0
+        # v4 cursors are per state file; the legacy single-file cursor
+        # migrates to its per-file key once
+        v4_updates = {}
+        lines = []
+        for path in self._v4_state_files():
+            key = f"last_v4_len::{os.path.basename(path)}"
+            if key not in self.log_state:
+                if os.path.basename(path) == "v4_state.json" \
+                        and "last_v4_len" in self.log_state:
+                    self.log_state[key] = self.log_state["last_v4_len"]
+                else:
+                    try:
+                        with open(path, encoding="utf-8") as f:
+                            self.log_state[key] = len(
+                                json.load(f).get("entries", []))
+                    except (OSError, ValueError):
+                        self.log_state[key] = 0
+            cur_v4, v4_lines = read_new_v4_entries(
+                path, self.log_state[key])
+            if v4_lines:
+                tag = self._v4_label(path)
+                lines += [f"[v4 {tag}]{l}" for l in v4_lines]
+            v4_updates[key] = cur_v4
         cur_ev, ev_lines = read_new_events(
             self.db_path, self.log_state["last_event_id"])
-        cur_v4, v4_lines = read_new_v4_entries(
-            self.v4_path, self.log_state["last_v4_len"])
-        lines = [f"[v3] {l}" for l in ev_lines] + v4_lines
+        lines = [f"[v3] {l}" for l in ev_lines] + lines
         if not lines:
             return
         try:
@@ -582,7 +654,7 @@ class HealthBoardBot(discord.Client):
             log.warning("log push failed: %s", exc)
             return
         self.log_state["last_event_id"] = cur_ev
-        self.log_state["last_v4_len"] = cur_v4
+        self.log_state.update(v4_updates)
         save_state(**self.log_state)
 
     async def _publish(self, content: str, bypass_throttle: bool) -> None:
@@ -633,6 +705,7 @@ def main() -> int:
         log.error("CHANNEL_ID must be an integer")
         return 2
     db_path = os.environ.get("DB_PATH", "/home/<USER>/dnd-dm-bot/data/campaign.db")
+    resolve_game_chat(db_path)
     bot = HealthBoardBot(channel_id, db_path)
     bot.run(token, log_handler=None)  # logging already goes to stdout/journald
     return 0
