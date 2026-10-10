@@ -714,11 +714,11 @@ class DiscordBot(discord.Client):
 
         async def _v4_turn(interaction, text, echo=None,
                            structured=False):
-            """Player v4 turn — v3-style UX:
-            1. Echo immediately (channel message, not defer)
-            2. Engine output immediately after resolution
-            3. Narration streams into a placeholder message"""
-            # 1. echo — immediate, visible to everyone
+            """Player v4 turn — v3-style UX with defer:
+            defer → echo → engine output (replaces placeholder) → narration"""
+            # defer FIRST: acknowledges the interaction (prevents 3s timeout)
+            await interaction.response.defer(thinking=True)
+            # echo — immediate, visible to everyone
             await interaction.channel.send(
                 f"🎭 **{interaction.user.display_name}** "
                 f"{_clip(text, 200)}")
@@ -762,10 +762,10 @@ class DiscordBot(discord.Client):
 
         async def _v4_admin(interaction, character, text):
             """Admin v4 turn for any character — with public echo."""
+            await interaction.response.defer(thinking=True)
             await interaction.channel.send(
                 f"🎛 **{interaction.user.display_name}** (admin) — "
                 f"**{character}** {_clip(text, 200)}")
-            await interaction.response.defer(thinking=True)
             try:
                 out = await svc._v4_admin_run(interaction, character, text)
             except Exception as e:
