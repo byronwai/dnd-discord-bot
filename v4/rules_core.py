@@ -7,7 +7,8 @@ through the Game. The narrator (P2) will turn ledger entries into prose.
 
 import re
 
-from engine.charlib import SKILL_ABILITY, normalize_skill, slots_for
+from engine.charlib import (SKILL_ABILITY, caster_kind, normalize_skill,
+                            slots_for)
 from engine.checks import parse_check_ability, total_mod
 from engine.moves import compute_attack_moves, move_spell_level
 from engine.dice import roll_expr
@@ -566,9 +567,10 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         lines = []
         for name, e in g.party.items():
             lvl = int(e.get("level", 1))
+            occ = e.get("occupation", "")
             if kind == "long":
                 e["slots"] = {str(k): v for k, v in
-                              slots_for(e.get("occupation", ""), lvl).items()}
+                              slots_for(occ, lvl).items()}
                 if g.alive(name):  # a long rest never revives the downed
                     e["hp_now"] = e["hp_max"]
                 lines.append(f"🌙 {name}：HP {e['hp_now']}/{e['hp_max']}，"
@@ -576,7 +578,15 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
             elif g.alive(name):
                 dmg, _ = roll_expr("1d8+2")
                 e["hp_now"] = min(int(e["hp_max"]), int(e["hp_now"]) + dmg)
-                lines.append(f"🌿 {name}：HP → {e['hp_now']}/{e['hp_max']}")
+                line = f"🌿 {name}：HP → {e['hp_now']}/{e['hp_max']}"
+                # pact magic (Warlock): ALL slots return on a SHORT rest
+                if caster_kind(occ) == "pact":
+                    full = {str(k): v for k, v
+                            in slots_for(occ, lvl).items()}
+                    if full and e.get("slots") != full:
+                        e["slots"] = full
+                        line += "，契約法術格全滿"
+                lines.append(line)
             else:
                 lines.append(f"🌑 {name}：倒地中，休息無效（需救治）")
         g.ledger.add(actor, "rest", f"隊伍{'長' if kind=='long' else '短'}休")

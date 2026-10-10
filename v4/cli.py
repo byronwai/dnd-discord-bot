@@ -258,6 +258,17 @@ def selftest() -> None:
     assert g.party["依思"]["slots"]["1"] == 2
     L.clear()
 
+    # pact magic (Warlock): ALL slots return on a SHORT rest too
+    from engine.charlib import caster_kind
+    if caster_kind(g.party["依思"].get("occupation", "")) == "pact":
+        g.party["依思"]["hp_now"] = 1  # deterministic: alive regardless
+        g.party["依思"]["slots"]["1"] = 0  # spent everything
+        run("依思 休息")
+        assert g.party["依思"]["slots"]["1"] == \
+            slots_for("Warlock", 2)[1], g.party["依思"]["slots"]
+        assert any("契約法術格全滿" in x for x in L), L
+    L.clear()
+
     # ledger is complete, replayable and serializable
     kinds = {e.kind for e in g.ledger.entries}
     assert {"scene", "combat", "check", "attack", "heal",

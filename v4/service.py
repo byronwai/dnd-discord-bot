@@ -199,6 +199,15 @@ class V4Service:
         #    engine answers with exits + suggestions instead of denying
         if it is not None and it.action == "move" and not it.destination:
             it.action = "meta"
+        # 3. rest kind: the LLM path doesn't emit args — sniff the kind
+        #    from the player's words（長休/long rest）so a long rest is
+        #    never silently downgraded to a short one
+        if it is not None and it.action == "rest" \
+                and not it.args.get("kind"):
+            raw = f"{it.raw or ''} {it.utterance or ''}"
+            it.args["kind"] = "long" if re.search(
+                r"長休|长休|long\s*rest|全休|過夜|过夜", raw, re.I) \
+                else "short"
         # ownership: only the character's owner may act as that character
         if user_id and it:
             # no actor specified → default to the CALLER's character
