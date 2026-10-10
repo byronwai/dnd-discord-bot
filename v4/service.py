@@ -356,7 +356,16 @@ class V4Service:
             help_bits.append(
                 "玩家在向 DM 求助——先用一兩句總結現況，然後明確指出"
                 f"可行的下一步（例如：{opts}）。不要只描寫氣氛。")
-        directives = [d for d in (rep_hint, *help_bits) if d]
+        # anti-parrot: the model copies its own recent openings (the
+        # 千兩黃金 fixation) — name them so it cannot reuse them
+        anti_open = None
+        if self._recent_narrations:
+            opens = "、".join(
+                f"「{n.strip()[:8]}…」"
+                for n in self._recent_narrations[-2:])
+            anti_open = (f"你最近的敘述開頭是 {opens}——"
+                         "這次禁止再用相同或相近的開頭，換全新的第一句。")
+        directives = [d for d in (rep_hint, anti_open, *help_bits) if d]
         extra = "\n· ".join(directives) if directives else None
         # item inventory: what the narrator may mention
         s = g.world.here
