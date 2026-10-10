@@ -58,6 +58,8 @@ def world_block(rules: dict) -> str:
 
 from .cli import META, build_demo_game
 from .digestor import Digestor
+from .director import canonize_scene, classify
+from .director_llm import DirectorLLM
 from .intent import Intent
 from .ledger import Ledger, Entry
 from .narrator import Narrator
@@ -84,6 +86,8 @@ class V4Service:
         self.channel_id = channel_id
         self.digestor = Digestor(llm_url, digest_model, think=digest_think)
         self.narrator = Narrator(llm_url, narr_model, think=narr_think)
+        # the generative Director (same small fast model as digestor)
+        self.director = DirectorLLM(llm_url, digest_model)
         # narration that never finished (narrator silent, or prose cut
         # mid-sentence): /continue resumes it before anything else.
         # (init BEFORE _load — the saved blob may restore it)
@@ -278,6 +282,43 @@ class V4Service:
                 it.action = "skill"
                 it.skill = _sk
                 it.target = it.target or it.args.pop("to", "")
+        # 5. UNPLANNED PLACES (v5 Director): walking somewhere that
+        #    isn't an exit asks the Director LLM to propose the scene —
+        #    the ENGINE gate canonizes it (typed, capped, exits back).
+        #    This is why a non-narrative LLM layer exists.
+        if it is not None and it.action == "move" and it.destination \
+                and not g.world.find_exit(it.destination):
+            tone = (self.rules or {}).get("tone", "奇幻")
+            canon = ((self.rules or {}).get("world") or {}).get("canon", [])
+            proposed = await self.director.gen_scene(
+                tone, g.world.here.name, g.world.here.description,
+                it.destination, gamerules_canon=canon)
+            if proposed and canonize_scene(g, proposed):
+                # point the move at the canonized name so find_exit hits
+                it.destination = proposed["name"]
+        # 6. UNPLANNED DISCOVERY: a search with nothing authored and no
+        #    named target may surface an LLM-proposed inert prop instead
+        #    of the static ambient table
+        if it is not None and it.action == "search" \
+                and not g.world.here.hidden_items:
+            from .director import scan_prop
+            text_blob = f"{it.raw or ''} {it.utterance or ''} {it.item or ''}"
+            if not scan_prop(text_blob) and g._random.random() < 0.35:
+                tone = (self.rules or {}).get("tone", "奇幻")
+                proposal = await self.director.gen_item(
+                    tone, g.world.here.name, g.world.here.description,
+                    it.utterance or it.raw or "搜索")
+                s = g.world.here
+                dup = any(proposal and (proposal["name"] in n
+                                        or n in proposal["name"])
+                          for n, _ in s.ground_items + s.hidden_items)
+                if proposal and not dup \
+                        and classify(proposal["name"]) == "prop":
+                    s.hidden_items.append((proposal["name"], 1))
+                    g.ledger.add("director", "materialize",
+                                 f"搜索途中世界浮現了 {proposal['name']}",
+                                 item=proposal["name"],
+                                 scene=g.world.current)
         # admin commands act as a chosen character: force the actor and
         # skip the ownership gate entirely (validity checked up top)
         if admin_actor and it is not None:

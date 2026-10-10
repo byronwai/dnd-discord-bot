@@ -142,3 +142,38 @@ def scan_prop(text: str) -> str:
             if tail in t:
                 return n
     return ""
+
+
+# cap on LLM-generated scenes: the world stays DM-shaped, not infinite
+MAX_DIRECTOR_SCENES = 12
+
+
+def canonize_scene(g, proposed: dict) -> bool:
+    """ENGINE GATE for unplanned places: validate the Director LLM's
+    typed proposal, build the scene node with bidirectional exits, and
+    ledger the retcon. Returns False when the gate refuses."""
+    if not isinstance(proposed, dict):
+        return False
+    name = str(proposed.get("name", "")).strip()
+    desc = str(proposed.get("description", "")).strip()
+    npc = str(proposed.get("npc", "")).strip()
+    if not (1 < len(name) <= 8) or not desc or len(desc) > 120:
+        return False
+    made = sum(1 for e in g.ledger.entries
+               if e.kind == "director_scene")
+    if made >= MAX_DIRECTOR_SCENES:
+        return False
+    # engine-owned id; exits are ALWAYS bidirectional — nobody gets lost
+    sid = f"dir{made + 1}_{abs(hash(name)) % 10000}"
+    here = g.world.here
+    from .world import Scene
+    scene = Scene(sid, name, desc, exits={here.id: here.name})
+    if npc and len(npc) <= 8:
+        scene.npcs.append({"name": npc, "desc": "陌生的面孔",
+                           "disposition": "neutral", "knows": []})
+    g.world.scenes[sid] = scene
+    here.exits[sid] = name
+    g.ledger.add("director", "director_scene",
+                 f"世界展開了新角落：{name}（通往 {here.name} 的回頭路仍在）",
+                 scene=sid, name=name)
+    return True
