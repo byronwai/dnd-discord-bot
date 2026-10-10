@@ -41,59 +41,56 @@ MARKER = "🩸 **隊伍健康看板 / Party Health Board**"
 
 # One-time play guide (posted into this channel on first boot; marker-scanned
 # + state.json flag so restarts never re-post it). Chunks stay under
-# Discord's 2000-char message limit.
+# Discord's 2000-char message limit. Bump GUIDE_VERSION to republish an
+# updated guide (the old pin is unpinned first).
 GUIDE_MARKER = "📘 **玩家指南 / Game Guide**"
+GUIDE_VERSION = 2
 GUIDE_CHUNKS = [
-    GUIDE_MARKER + """（本訊息由看板機器人發布一次，不會重複）
+    GUIDE_MARKER + """ v2（本訊息由看板機器人發布；指南更新時會自動重發新版）
 
 **這是什麼遊戲？**
 AI 地下城主（DM）主持的《龍與地下城》5e 冒險：你們扮演角色說話、行動、擲骰；DM 扮演全世界。
-核心原則：**引擎判定、模型敘事** — 骰值、HP、物品、XP 全部由系統計算，DM 只把結果寫成故事。
+核心原則：**引擎判定、模型敘事** — 骰值、HP、物品、情報全部由系統計算，DM 只把結果寫成故事。
 
 **🚀 快速開始**
-1️⃣ `/rollstats` 擲屬性
-2️⃣ `/classes` 挑職業（12 種）
-3️⃣ `/pc <名字> <職業>` 建立角色（屬性由系統公正擲骰）
-4️⃣ `/new <場景>` 開新冒險（可選難度：新手／標準／困難）
-5️⃣ 之後直接打字就行——說話＝行動！
+1️⃣ `/pc <名字> <職業>` 建立角色（屬性由系統公正擲骰）
+2️⃣ `/explore <描述>` 自由行動——粵語英文都得
+3️⃣ 之後直接玩：說話＝行動！
 
-**💬 怎麼行動**
-直接在遊戲頻道用文字描述（「我推開門」「向老闆娘打聽消息」「我用火把照牆壁」）。
-DM 每回合以繁體中文敘述 80–180 字，結尾給你鉤子或建議選項。XP、升級、HP、物品全部自動追蹤。""",
+**💬 怎麼行動（/explore 自由描述）**
+例子：「我匿埋一邊」（潛行）、「用醫藥救依思」（醫藥）、「向船長打聽線索」（社交）、
+「執起地下把劍」（拾取）。引擎自動挑技能＋熟練加值；唔確定就出檢定卡等你骰。""",
 
     """**🎯 檢定怎麼骰**
-不確定的行動由引擎自動判定：d20＋角色真實修正值 vs DC。
-引擎即時顯示完整結果（🎲 檢定行），敘事隨後補上。
+引擎覺得結果不確定時會出檢定卡（🎯 … vs DC）。
+你執行 `/roll d20` → 引擎套用你的修正值判定 → **劇情自動續寫**（逐字輸出）。
 
-**⚔️ 戰鬥流程**
-1. 場景觸發遭遇 → 系統自動擲全體先攻（含敵人）
-2. 輪到你時：用 `/combat` 選單行動（攻擊／物品／技能／防禦／撤退）
-3. 引擎即時結算命中、傷害、HP，敘事隨後
-4. 敵人回合由引擎自動結算
-5. 敵人全滅 → 自動收戰
+**⚔️ 戰鬥（每人一個專屬指令，自動完成帶細節）**
+`/attack [目標] [招式]` — 目標清單帶敵人 HP
+`/use [物品] [隊友]` — 用物品；**餵倒地隊友藥水＝救佢**
+`/skill [技能] [對象]` — 18 項技能（★＝熟練）
+`/defend` 防禦（敵人對你劣勢）· `/flee` 撤退 · `/observe` 找破綻（下擊優勢）
+輪到你時引擎會提示；敵人回合自動結算。
 
 **🧰 玩家指令**
-探索：`/explore`（對話／搜索／移動）
-戰鬥：`/combat`（RPG 選單）
-擲骰：`/roll` · 給物品：`/give`
-狀態：`/status` · 推進：`/continue` · 說明：`/help`
+`/inventory` 物品＋法術格＋技能＋招式 · `/status` HP＋場景＋📜已知情報
+`/give` 給隊友（不填對象＝放地上） · `/continue` 卡住時推進 · `/help` 說明
 
-**🎛 管理員指令**
-`/explore-admin <text> <char>` — 以任意角色探索
-`/combat-admin` — 以任意角色戰鬥
-`/roll-admin <骰式> <角色>` — 代擲
-`/give-admin <角色> <物品>` — 給物品
+**🎛 管理員**
+explore/attack/use/skill/defend/flee/observe-roll/give 的 `-admin` 版本""",
 
-**規則**
-· 只能控制自己擁有的角色（引擎強制）
-· NPC 只透露已知事實（引擎管理）
-· 直接打字＝桌邊聊天（引擎記錄但不回應）""",
-
-    """**🩸 關於這個頻道的看板**
-本頻道的健康看板每 2 秒自動更新：隊伍 HP 條與狀態、場景與難度、待決檢定、戰鬥敵人血條、最近事件。它只讀取遊戲資料庫，不會介入對話。
+    """**📜 情報系統**
+每個 NPC 知道若干事實；成功的交談/洞察會問出**新**情報（一次一項），
+問過的自動記在 `/status` 的「已知情報」——不用重問。
+建議行動會顯示進度（已問出 2/4）。
 
 **🔄 一回合的流程**
-你說話（行動）→ DM 想故事 → 不確定就發檢定卡 → 你骰（回覆「骰」或 `/roll`）→ 系統判定 → DM 敘述結果 → HP／物品／XP 自動更新 → 看板同步顯示。
+你說話（行動）→ 引擎即時判定（🎲）→ 不確定就出檢定卡 → 你 `/roll d20` →
+系統判定 → DM 逐字敘述結果 → HP／物品／情報自動更新 → 看板同步。
+
+**其他**
+· 直接打字＝桌邊聊天（引擎記錄但不回應）
+· 只能控制自己擁有的角色（引擎強制）
 
 祝冒險愉快！有問題隨時 `/help` 🎲""",
 ]
@@ -514,22 +511,28 @@ class HealthBoardBot(discord.Client):
                             "'applications.commands' in the invite?)", g.id, exc)
 
     async def _ensure_guide(self):
-        """Post the play guide once per channel (state flag + marker scan)."""
+        """Post the play guide once per channel; a GUIDE_VERSION bump
+        republishes (unpins the old guide first) so updates reach the
+        channel, not just fresh installs."""
         if self._guide_done:
             return
         self._guide_done = True
-        if load_state().get("guide_posted"):
-            return
+        st = load_state()
+        if st.get("guide_posted") \
+                and st.get("guide_version") == GUIDE_VERSION:
+            return  # current version already posted
         try:
             if self.channel is None:
                 self.channel = self.get_channel(self.channel_id) \
                     or await self.fetch_channel(self.channel_id)
-            async for msg in self.channel.history(limit=100):
-                if msg.author.id == self.user.id and \
-                        msg.content.startswith(GUIDE_MARKER):
-                    save_state(guide_posted=True)
-                    log.info("guide already present (message %s)", msg.id)
-                    return
+            # retire any older pinned guide first
+            try:
+                for m in await self.channel.pins():
+                    if m.author.id == self.user.id \
+                            and m.content.startswith(GUIDE_MARKER):
+                        await m.unpin()
+            except discord.HTTPException:
+                pass
             first = None
             for chunk in GUIDE_CHUNKS:
                 sent = await self.channel.send(chunk)
@@ -538,8 +541,9 @@ class HealthBoardBot(discord.Client):
                 await first.pin()  # nice-to-have; needs manage-messages
             except discord.HTTPException:
                 pass
-            save_state(guide_posted=True)
-            log.info("game guide posted (%d chunks, first pinned)", len(GUIDE_CHUNKS))
+            save_state(guide_posted=True, guide_version=GUIDE_VERSION)
+            log.info("game guide v%s posted (%d chunks, first pinned)",
+                     GUIDE_VERSION, len(GUIDE_CHUNKS))
         except discord.HTTPException as exc:
             log.warning("guide post failed: %s", exc)
 

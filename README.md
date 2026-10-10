@@ -39,19 +39,27 @@ python v4/cli.py selftest
 python v4/cli.py
 ```
 
-## Commands (13)
+## Commands (24: 15 player + 9 admin)
 
 | Player | Admin |
 |---|---|
-| `/explore <text>` — freeform action | `/explore-admin <text> <char>` |
-| `/combat` — RPG menu (autocomplete) | `/combat-admin` |
-| `/confirm` — confirm pending action | |
-| `/inventory` — items + slots + moves | |
-| `/roll [expr]` — dice | `/roll-admin <expr> <char>` |
-| `/give <item> [to]` — transfer | `/give-admin <char> <item> [qty]` |
-| `/status` — party + scene | |
-| `/continue` — unstuck | |
+| `/pc name occupation` — create character | `/explore-admin text char` |
+| `/explore <text>` — freeform action | `/attack-admin char target move` |
+| `/confirm` — confirm pending action | `/use-admin char item on` |
+| `/attack [target] [move]` — typed combat family | `/skill-admin char skill on` |
+| `/use [item] [on]` — item / feed a DOWNED ally | `/defend-admin` `/flee-admin` |
+| `/skill [skill] [on]` — 18 skills ★, context targets | `/observe-admin char target` |
+| `/defend` `/flee` `/observe [target]` | `/roll-admin expr char` |
+| `/inventory` — items + slots + skills + moves | `/give-admin char item qty` |
+| `/roll [expr]` — dice (settles checks, auto-continues) | |
+| `/give item [to]` — transfer; no recipient = set down | |
+| `/status` — party + scene + disclosed intel | |
+| `/continue` — finish unfinished narration, else unstuck | |
 | `/help` | |
+
+Every combat command has its own typed autocomplete (enemy HP,
+item quantities, ★-proficient skills, downed-ally markers) — one
+command per action instead of one polymorphic menu.
 
 **In-channel keywords** (instant, no LLM): `status` `inv` `moves` `scene`
 
@@ -104,7 +112,7 @@ engine/                 # shared pure math (no LLM, no Discord)
 └── moves.py            # class move tables + compute_attack_moves
 
 adapters/
-└── discord_bot.py      # 13 slash commands + channel routing
+└── discord_bot.py      # 24 slash commands (typed combat family) + routing
 
 health/
 └── health_board.py     # debug portal (log stream + /moves)

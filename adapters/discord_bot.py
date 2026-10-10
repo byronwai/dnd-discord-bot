@@ -32,12 +32,13 @@ def _split(text: str, limit: int = 1900):
     return chunks
 
 
-HELP_TEXT = """🎲 **v4 引擎指令 / Commands**（11 個）
+HELP_TEXT = """🎲 **v4 引擎指令 / Commands**（玩家 15 · 管理 9）
 
 **玩家 / Player**
-`/explore <text>` — 探索／對話／移動（非戰鬥行動）
-　· 引擎即時判定（搜索/NPC對話/場景移動），敘事隨後補上
+`/pc <名字> <職業>` — 建立角色（屬性由系統公正擲骰）
+`/explore <text>` — 探索／對話／移動（自由描述，引擎判定）
 　· 範例：`/explore 依思詢問船長關於巴鐸的線索`
+`/confirm` — 確認待確認的行動
 
 **戰鬥指令 / Combat**（各指令有自己的自動完成清單）
 `/attack [目標] [招式]` — 攻擊（目標清單帶敵人 HP；招式按角色列出）
@@ -53,32 +54,26 @@ HELP_TEXT = """🎲 **v4 引擎指令 / Commands**（11 個）
 技能效果：潛行→下擊有優勢；洞察→看穿 NPC 真實態度；醫藥→救醒倒地隊友；
 察覺/調查→搜出隱藏物；社交（說服/欺瞞/恐嚇/表演）→改變 NPC 態度。
 
-`/roll [expr]` — 擲骰（`/roll d20`、`/roll 2d6+3`、`/roll adv`）
-
-`/give <item> [to]` — 把物品給隊友
-
-`/status` — 隊伍 HP／法術格／場景／戰鬥狀態
-
-`/continue` — 未完成的敘事先逐字續寫；否則推進遊戲（待確認／戰鬥輪到誰／場景重述）
-
+`/roll [expr]` — 擲骰（`/roll d20` 會結算待定檢定並自動續寫劇情）
+`/inventory` — 物品欄＋法術格＋18 技能（★熟練）＋招式
+`/give <item> [to]` — 給隊友；不填 to＝放在地上（可拾回）
+`/status` — 隊伍 HP／法術格／場景／戰鬥／📜已知情報
+`/continue` — 未完成的敘事先逐字續寫；否則推進遊戲
 `/help` — 本說明
 
 **管理員 / Admin**
 `/explore-admin <text> <char>` — 以任意角色探索
 `/attack-admin` `/use-admin` `/skill-admin` `/defend-admin` `/flee-admin`
-`/observe-admin` — 以任意角色執行對應戰鬥行動（自動完成同玩家版）
-`/roll-admin <expr> <char>` — 代擲
+`/observe-admin` — 以任意角色執行對應戰鬥行為（自動完成同玩家版）
+`/roll-admin <expr> <char>` — 代擲（d20 會結算待定檢定）
 `/give-admin <char> <item> [qty]` — 給物品
 
 **頻道內關鍵字**（直接打字，即時回應、無 LLM）：
-`status` — 隊伍狀態
-`inv` — 物品清單
-`moves` — 招式一覽
-`scene` — 場景描述
+`status` `inv` `moves` `scene`
 
 **桌邊聊天**：直接打字＝玩家間對話（引擎記錄但不回應）
 **角色限制**：只能控制自己擁有的角色（引擎強制）
-**NPC 對話**：NPC 只會透露其已知的事實（引擎管理）"""
+**NPC 對話**：NPC 只會透露其已知的事實（問過的在 `/status` 已知情報）"""
 
 
 class DiscordBot(discord.Client):

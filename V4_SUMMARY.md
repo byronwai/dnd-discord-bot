@@ -27,23 +27,28 @@ Player text ──→ [Digestor 12b] ──→ Intent JSON
                    (no LLM)          (guards applied)   log stream
 ```
 
-## 2. Commands (14)
+## 2. Commands (24: 15 player + 9 admin)
 
-| Player (10) | Admin (4) |
+| Player | Admin |
 |---|---|
 | `/pc name occupation` — create character | `/explore-admin text char` |
-| `/explore text` — freeform action (digestor→engine) | `/combat-admin` |
-| `/confirm` — confirm pending action | `/roll-admin expr char` |
-| `/attack [target] [move]` — typed combat family | `/give-admin char item qty` |
-| `/use [item] [on]` — item / feed a DOWNED ally | |
-| `/inventory [char]` — items + slots + moves + skills | |
+| `/explore text` — freeform action (digestor→engine) | `/attack-admin char target move` |
+| `/confirm` — confirm pending action | `/use-admin char item on` |
+| `/attack [target] [move]` — enemy-HP autocomplete | `/skill-admin char skill on` |
+| `/use [item] [on]` — item / feed a DOWNED ally | `/defend-admin` `/flee-admin` |
+| `/skill [skill] [on]` — 18 skills ★, context targets | `/observe-admin char target` |
+| `/defend` `/flee` `/observe [target]` | `/roll-admin expr char` |
+| `/inventory [char]` — items + slots + moves + skills | `/give-admin char item qty` |
 | `/roll [expr]` — dice (settles pending checks) | |
 | `/give item [to]` — transfer; no recipient = set down here | |
-| `/skill [skill] [on]` — 18 skills ★, contextual targets | |
-| `/defend` `/flee` `/observe [target]` — dodge / disengage / weak spot | |
-| `/status` — party + scene | |
+| `/status` — party + scene + 📜 disclosed intel | |
 | `/continue` — finish unfinished narration (streams), else unstuck | |
 | `/help` | |
+
+One typed command per combat action — each carries its own
+autocomplete (enemy HP, item ×qty, ★ skills, downed markers) instead of
+a single polymorphic `/combat` menu. #dnd-health republishes its pinned
+guide when `GUIDE_VERSION` bumps.
 
 **Channel keywords** (instant, no LLM): `status` `inv` `moves` `scene`
 **Plain text** = table talk (silently ignored)
