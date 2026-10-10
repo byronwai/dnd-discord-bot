@@ -213,6 +213,16 @@ class V4Service:
             it.args["kind"] = "long" if re.search(
                 r"長休|长休|long\s*rest|全休|過夜|过夜", raw, re.I) \
                 else "short"
+        # 4. 「使用 醫藥／醫術」 is a SKILL attempt, not an item use —
+        #    the 使用 verb pulls the digestor toward `use`; when the
+        #    "item" names a skill, reroute deterministically
+        if it is not None and it.action == "use":
+            from engine.charlib import normalize_skill
+            _ab, _sk = normalize_skill(it.item or "")
+            if _sk:
+                it.action = "skill"
+                it.skill = _sk
+                it.target = it.target or it.args.pop("to", "")
         # admin commands act as a chosen character: force the actor and
         # skip the ownership gate entirely (validity checked up top)
         if admin_actor and it is not None:

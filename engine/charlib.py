@@ -37,7 +37,8 @@ SKILL_ZH = {
     "奧秘": "arcana", "歷史": "history", "調查": "investigation",
     "自然": "nature", "宗教": "religion",
     "馴獸": "animal handling", "洞悉": "insight", "洞察": "insight",
-    "醫藥": "medicine", "察覺": "perception", "求生": "survival",
+    "醫藥": "medicine", "醫術": "medicine", "醫療": "medicine",
+    "察覺": "perception", "偵察": "perception", "求生": "survival",
     "欺瞞": "deception", "欺騙": "deception", "恐嚇": "intimidation",
     "表演": "performance", "說服": "persuasion",
 }

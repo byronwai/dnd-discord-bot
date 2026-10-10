@@ -37,7 +37,8 @@ class Digestor:
             "deception，想嚇佢填 skill=intimidation，想遊說填 skill="
             "persuasion。\n"
             "search ＝搜索、調查周圍環境。\n"
-            "use    ＝使用身上嘅物品（餵隊友食藥／藥水都算："
+            "use    ＝使用身上嘅物品（只限物品——技能名稱例如醫藥／潛行／"
+            "洞察係 skill，唔好用 use。餵隊友食藥／藥水都算 use："
             "target 填隊友名——隊友暈咗都可以餵）。\n"
             "cast   ＝施展法術或技能。\n"
             "skill  ＝主動使用一項 D&D 技能（冇施法成分嗰啲）。認住意思：\n"
@@ -106,6 +107,8 @@ class Digestor:
             '"action":"skill","skill":"medicine","target":"依思"}\n'
             '「餵依思喝治療藥水」→ {"paraphrase":"餵依思喝治療藥水",'
             '"action":"use","item":"治療藥水","target":"依思"}\n'
+            '「對依思使用醫藥」→ {"paraphrase":"對依思施展醫藥",'
+            '"action":"skill","skill":"medicine","target":"依思"}\n'
             '「我爬上去嗰道牆」→ {"paraphrase":"爬上那道牆","action":"skill",'
             '"skill":"athletics"}\n'
             '「我哋而家點算好？」→ {"paraphrase":"我們現在怎麼辦",'
