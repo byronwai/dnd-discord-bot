@@ -110,11 +110,10 @@ health/
 └── health_board.py     # debug portal (log stream + /moves)
 
 tools/                  # operational scripts
-├── ingest_srd.py       # build rules.db from SRD markdown
-├── playtest.py         # e2e smoke test
-└── status.py           # game status report
+└── ingest_srd.py       # build rules.db from SRD markdown
 
 legacy/                 # v3 code (archived, not imported)
+└── tools-v3/           # v3-era tools (seed_inv, playtest, status, ...)
 ```
 
 ## Models

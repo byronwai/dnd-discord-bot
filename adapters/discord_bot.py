@@ -77,13 +77,28 @@ HELP_TEXT = """🎲 **v4 引擎指令 / Commands**（11 個）
 
 
 class DiscordBot(discord.Client):
-    def __init__(self, engine, message_content: bool = True):
+    def __init__(self, message_content: bool = True):
         intents = discord.Intents.default()
         intents.message_content = message_content
         super().__init__(intents=intents)
-        self.engine = engine
         self.tree = app_commands.CommandTree(self)
         self._v4_games: dict[str, object] = {}  # channel_id → V4Service
+
+        @self.tree.error
+        async def on_app_command_error(interaction, error):
+            # a crashed command must never leave the interaction hanging
+            # (「該申請未受回應」) — players always get an answer
+            log.exception("command failed", exc_info=error)
+            cause = getattr(error, "__cause__", None) or error
+            msg = _clip(f"⚠️ 指令出錯：{cause}")
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(msg)
+                else:
+                    await interaction.response.send_message(msg)
+            except discord.HTTPException:
+                pass
+
         self._register_commands()
 
     async def setup_hook(self):
@@ -514,8 +529,7 @@ class DiscordBot(discord.Client):
                 lines.append(f"  {ab}：{row}")
             lines.append("　　（用 `/explore` 描述動作，或 `/combat` → 技能）")
             # moves
-            from engine.moves import compute_attack_moves, \
-                DMEngine
+            from engine.moves import compute_attack_moves
             inv_tuples = [("item", n, q) for n, q in inv]
             mx = g.max_slot(char)
             moves = compute_attack_moves(
@@ -983,6 +997,6 @@ class DiscordBot(discord.Client):
         return out
 
 
-async def run_discord(engine, token: str):
-    bot = DiscordBot(engine, message_content=True)
+async def run_discord(token: str):
+    bot = DiscordBot(message_content=True)
     await bot.start(token)
