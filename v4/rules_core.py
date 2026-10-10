@@ -696,7 +696,8 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
                 if it.target and (it.target in n["name"]
                                   or n["name"] in it.target):
                     from .world import Enemy
-                    enemy = Enemy.make(n["name"], 8, 13, 3, "1d6")
+                    enemy = Enemy.make(n["name"], 8, 13, 3, "1d6",
+                                    loot=list(n.get("loot", [])))
                     g.encounters.setdefault(g.world.current, []).append(
                         enemy)
                     if not g.combat.active:

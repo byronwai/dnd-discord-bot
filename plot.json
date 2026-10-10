@@ -56,7 +56,12 @@
     "bador_flees": {
       "text": "🧳 護衛倒下的消息傳開——巴鐸失去了爪牙的保護，據說他連夜逃向海底祭壇，要親自向女王獻祭贖罪。",
       "effects": [
-        {"npc_move": {"npc": "巴鐸", "to_scene": "altar"}}
+        {"npc_move": {"npc": "巴鐸", "to_scene": "altar"}},
+        {"npc_spawn": {"name": "巴鐸", "scene": "altar",
+                        "desc": "狼狽的商人，懷裡鼓鼓的",
+                        "disposition": "wary",
+                        "knows": ["項鍊是我偷的，但我不會交出來"],
+                        "loot": ["海妖女王的項鍊"]}}
       ]
     },
     "flower_reacts": {

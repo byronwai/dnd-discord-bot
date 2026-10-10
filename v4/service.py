@@ -54,6 +54,11 @@ def world_block(rules: dict) -> str:
     if canon:
         bits.append("世界事實（必須遵守，絕不得矛盾）：\n"
                     + "\n".join(f"- {c}" for c in canon))
+        bits.append(
+            "⚠️ 世界事實只是背景知識——不代表那些人／物在當前場景！"
+            "劇情物品（項鍊、寶物、武器、藥水等）的位置由引擎決定："
+            "絕不得讓它們在敘事中出現、掉落、滾出、或看似可被取得——"
+            "玩家因此撲空＝敘事的錯。")
     return "\n".join(bits)
 
 from .cli import META, build_demo_game

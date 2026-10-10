@@ -109,6 +109,21 @@ def _apply_effect(g, eff: dict, out: list):
             out.append(f"👀 {foe.name} 出沒於 {s.name}……")
     if "clock" in eff:
         pass  # handled by the caller (needs the state dict)
+    if "npc_spawn" in eff:
+        spec = eff["npc_spawn"]
+        s = _scene_by(g, spec.get("scene", ""))
+        name = spec.get("name", "")
+        if s is not None and name and not any(
+                n["name"] == name for sc in g.world.scenes.values()
+                for n in sc.npcs):
+            s.npcs.append({
+                "name": name,
+                "desc": spec.get("desc", "陌生的身影"),
+                "disposition": spec.get("disposition", "wary"),
+                "knows": list(spec.get("knows", [])),
+                "loot": list(spec.get("loot", []))})
+            out.append(f"👥 {name} 出現在 {s.name}")
+        return
     if "cond" in eff:
         spec = eff["cond"]
         who = spec.get("who", "")
