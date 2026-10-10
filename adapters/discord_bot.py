@@ -669,6 +669,9 @@ class DiscordBot(discord.Client):
                     cont, text = False, ""
                 if cont and text:
                     await narr_msg.edit(content=_clip("📖（續）" + text))
+                    # resolve the deferred interaction (clears 正在思考…)
+                    await interaction.followup.send(
+                        "📖 未完成的敘事已接續完成（見上）")
                     return
                 try:  # nothing came of it — clean up, fall through
                     await narr_msg.delete()
@@ -808,12 +811,14 @@ class DiscordBot(discord.Client):
         async def _v4_turn(interaction, text, echo=None,
                            structured=False):
             """Player v4 turn — v3 word-by-word UX:
-            defer → echo → engine verdict (instant) → narration streams
-            into its own message and STAYS there (final edit completes it)."""
+            defer → echo (followup, resolves the thinking indicator) →
+            engine verdict (instant) → narration streams into its own
+            message and STAYS there (final edit completes it)."""
             # defer FIRST: acknowledges the interaction (prevents 3s timeout)
             await interaction.response.defer(thinking=True)
-            # echo — immediate, visible to everyone
-            await interaction.channel.send(
+            # echo as the interaction followup: resolves 「正在思考…」
+            # immediately — without any followup the ghost never clears
+            await interaction.followup.send(
                 f"🎭 **{interaction.user.display_name}** "
                 f"{_clip(text, 200)}")
 
@@ -890,8 +895,8 @@ class DiscordBot(discord.Client):
             await interaction.response.defer(thinking=True)
             die, _ = roll_expr("d20")
             tag = f" {echo}" if echo else ""
-            # echo the raw die immediately — the verdict follows
-            await interaction.channel.send(
+            # echo the raw die as the followup — resolves 「正在思考…」
+            await interaction.followup.send(
                 f"🎲{tag} **{interaction.user.display_name}** "
                 f"d20 → **{die}**")
 
@@ -930,7 +935,8 @@ class DiscordBot(discord.Client):
         async def _v4_admin(interaction, character, text):
             """Admin v4 turn for any character — with public echo."""
             await interaction.response.defer(thinking=True)
-            await interaction.channel.send(
+            # echo as the followup — resolves 「正在思考…」
+            await interaction.followup.send(
                 f"🎛 **{interaction.user.display_name}** (admin) — "
                 f"**{character}** {_clip(text, 200)}")
             try:
