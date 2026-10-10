@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "title": "霧錨鎮與沉沒之城 — 劇情脊柱",
+  "description": "預生成的是處境，不是劇本：時鐘倒數、觸發器待命，劇情主動找上玩家。beat 由引擎點火（ledger kind=beat），narrator 只負責渲染。改這裡即改劇情。",
+  "clocks": [
+    {
+      "id": "queen_patience",
+      "name": "海妖女王的耐心",
+      "max": 40,
+      "start": 24,
+      "on_expire": "queen_angry",
+      "hint": "海妖女王的耐心正在倒數"
+    },
+    {
+      "id": "sea_creeps",
+      "name": "深海魚人集結",
+      "max": 30,
+      "start": 0,
+      "on_expire": "fishmen_raid",
+      "hint": "深海魚人在暗處集結"
+    }
+  ],
+  "triggers": [
+    {
+      "id": "guard_down_bador_flees",
+      "when": {"enemy_dead": "巴鐸的護衛"},
+      "beat": "bador_flees"
+    },
+    {
+      "id": "flower_found",
+      "when": {"item": "深海幽藍花"},
+      "beat": "flower_reacts"
+    },
+    {
+      "id": "necklace_returned",
+      "when": {"all": [{"item": "海妖女王的項鍊"}, {"scene": "dock"}]},
+      "beat": "ending_alliance"
+    }
+  ],
+  "beats": {
+    "queen_angry": {
+      "text": "⚠️ 海妖女王等不下去了——她的憤怒攪動深海，潮水變得狂暴。",
+      "effects": [
+        {"npc_disposition": {"npc": "海妖女王", "to": "wary"}},
+        {"clock": {"id": "sea_creeps", "set": 20}}
+      ]
+    },
+    "fishmen_raid": {
+      "text": "🌊 深海魚人登上了甲板海域——牠們奉女王之命前來搜捕。",
+      "effects": [
+        {"spawn": {"scene": "海上·甲板", "enemy": {
+          "name": "深海魚人", "hp": 9, "ac": 13,
+          "attack_bonus": 3, "dmg": "1d6"}}}
+      ]
+    },
+    "bador_flees": {
+      "text": "🧳 護衛倒下的消息傳開——巴鐸失去了爪牙的保護，據說他連夜逃向海底祭壇，要親自向女王獻祭贖罪。",
+      "effects": [
+        {"npc_move": {"npc": "巴鐸", "to_scene": "altar"}}
+      ]
+    },
+    "flower_reacts": {
+      "text": "💐 深海幽藍花在你們手中輕輕顫動，花瓣指向祭壇更深處——它認得回家的路。",
+      "effects": []
+    },
+    "ending_alliance": {
+      "text": "👑 項鍊回到女王頸上的一刻，海面平靜了。她履行承諾：族人得釋，泉水現址——這片海域多了一位盟友。",
+      "effects": [],
+      "ending": "queen_alliance"
+    }
+  }
+}

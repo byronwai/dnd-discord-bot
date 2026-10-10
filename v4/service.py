@@ -53,6 +53,7 @@ from .digestor import Digestor
 from .intent import Intent
 from .ledger import Ledger, Entry
 from .narrator import Narrator
+from .plot import load_plot, new_state, tick as plot_tick
 from .rules_core import resolve
 from .turn import Game
 from .world import Enemy, Scene, World
@@ -82,7 +83,10 @@ class V4Service:
         # game rules (gamerules.json) — world tone + canon the narrator
         # must stick to; single source of truth, DM-editable
         self.rules = load_gamerules()
+        # plot spine (plot.json) — clocks + trigger-fired beats
+        self.plot = load_plot()
         self.game: Game = self._load() or build_demo_game()
+        self.plot_state = self._plot_state()
         self.pending = None  # Intent awaiting the player's /confirm
         self._recent_narrations: list[str] = []  # v3: repetition guard
 
@@ -111,6 +115,7 @@ class V4Service:
             "turn": g.ledger.turn,
             "entries": [asdict(e) for e in g.ledger.entries],
             "unfinished": self._unfinished,
+            "plot": self.plot_state,
         }
         with open(self.path, "w", encoding="utf-8") as f:
             json.dump(blob, f, ensure_ascii=False, indent=1)
@@ -144,7 +149,14 @@ class V4Service:
         for e in blob.get("entries", []):
             g.ledger.entries.append(Entry(**e))
         self._unfinished = blob.get("unfinished")
+        self._loaded_plot = blob.get("plot")
         return g
+
+    def _plot_state(self) -> dict:
+        st = getattr(self, "_loaded_plot", None)
+        if isinstance(st, dict) and "clocks" in st and "fired" in st:
+            return st
+        return new_state(self.plot)
 
     # ---------- admin helpers ----------
 
@@ -285,6 +297,12 @@ class V4Service:
         r = resolve(g, it)
         if r.confirm is not None:
             self.pending = r.confirm
+        # v5 Pillar B: clocks tick, triggers fire — beats become part of
+        # THIS turn's verdict and narration (the plot comes to them)
+        if self.plot:
+            beat_lines, _m = plot_tick(g, self.plot, self.plot_state)
+            if beat_lines:
+                r.lines += beat_lines
         # v3 lesson: every turn ends with a hook — append before posting
         if r.accepted and r.lines:
             from .templates import render_turn_context

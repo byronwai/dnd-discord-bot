@@ -140,6 +140,9 @@ def render_hint(entry, game=None) -> str:
         return ("火焰竄起的瞬間，濃煙遮住了半邊天——這地方燒起來了，"
                 "而且短期內不會停。")
 
+    if kind == "beat":
+        return entry.text  # beats ARE prose directives from the spine
+
     if kind == "observe":
         return f"{actor} 眯起眼睛盯著 {target}，不放過任何一絲破綻。"
 
