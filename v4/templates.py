@@ -128,6 +128,12 @@ def render_hint(entry, game=None) -> str:
         return (f"{npc} 壓低聲音，把「{fact}」原原本本告訴了 {actor}——"
                 "這是之前沒人知道的細節。")
 
+    if kind == "defend":
+        return f"{actor} 收勢凝神，把武器橫在身前，門戶守得滴水不漏。"
+
+    if kind == "observe":
+        return f"{actor} 眯起眼睛盯著 {target}，不放過任何一絲破綻。"
+
     if kind == "skill":
         sk = d.get("skill", "")
         tgt = d.get("target", "")

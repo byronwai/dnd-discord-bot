@@ -331,14 +331,20 @@ def _attack(g: Game, actor: str, target: str, move: str = "") -> ResolveResult:
         return ResolveResult([f"找不到目標「{target}」"], accepted=False)
     ac = foe.ac if foe else g.ac_of(tgt_char)
     bonus = total_mod(g.party[actor], ability, kind="attack")
-    # successful stealth grants one unseen-attacker attack (SRD: advantage)
-    stealthed = bool(getattr(g, "_stealth", {}).pop(actor, False)) \
-        if isinstance(getattr(g, "_stealth", None), dict) else False
+    # advantage sources: successful stealth (unseen attacker) or a
+    # teammate's observe (weak spot found) — both one-shot
+    stealthed = bool(isinstance(getattr(g, "_stealth", None), dict)
+                     and g._stealth.pop(actor, False))
+    aid_tgt = (foe.name if foe else tgt_char) or ""
+    aided = bool(isinstance(getattr(g, "_aid", None), dict)
+                 and g._aid.pop(aid_tgt, False))
     d = g.d20()
     adv_note = ""
-    if stealthed:
+    if stealthed or aided:
         d2 = g.d20()
-        adv_note = f"（潛行優勢：{d}/{d2} 取高）"
+        labels = ([] + (["潛行"] if stealthed else [])
+                  + (["破綻"] if aided else []))
+        adv_note = f"（{'＋'.join(labels)}優勢：{d}/{d2} 取高）"
         d = max(d, d2)
     total = d + bonus
     crit = d >= 20
@@ -386,12 +392,20 @@ def _enemy_turn(g: Game, foe) -> list[str]:
     if not targets:
         return lines
     tgt = g._random.choice(targets)  # spread damage, no deathless focus-fire
+    dodging = bool(isinstance(getattr(g, "_dodge", None), dict)
+                   and g._dodge.get(tgt))
     d = g.d20()
+    dodge_note = ""
+    if dodging:
+        d2 = g.d20()
+        dodge_note = f"（{tgt} 防禦中：{d}/{d2} 取低）"
+        d = min(d, d2)
     total = d + foe.attack_bonus
     ac = g.ac_of(tgt)
     hit = d >= 20 or (d > 1 and total >= ac)
     lines.append(f"🎲 {foe.name} 攻擊 {tgt}：d20({d}){foe.attack_bonus:+d} "
-                 f"= {total} vs AC {ac} → {'✅ 命中' if hit else '❌ 未命中'}")
+                 f"= {total} vs AC {ac} → {'✅ 命中' if hit else '❌ 未命中'}"
+                 + dodge_note)
     g.ledger.add(foe.name, "attack", lines[-1], target=tgt, hit=hit)
     if hit:
         dmg, det = roll_expr(foe.dmg)
@@ -752,6 +766,52 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         _post_rotation(g)
         return ResolveResult([f"⏭ {actor} 等待"])
 
+    if it.action == "defend":
+        # dodge: until their next turn, attacks against them have
+        # disadvantage (engine-flagged, enemy rolls see it)
+        if not isinstance(getattr(g, "_dodge", None), dict):
+            g._dodge = {}
+        g._dodge[actor] = True
+        g.ledger.add(actor, "defend", f"{actor} 擺出防禦姿態（閃避）")
+        _post_rotation(g)
+        return ResolveResult(
+            [f"🛡 {actor} 全神貫注防守——敵人下一次攻擊他將有劣勢"])
+
+    if it.action == "escape":
+        if not g.combat.active:
+            return ResolveResult(["❓ 現在沒有戰鬥，不用撤退。"],
+                                 accepted=False)
+        # party disengage attempt: DEX check, success = leave combat
+        ok, line = ability_check(g, actor, "DEX", 12,
+                                 auto=True)
+        lines = [line]
+        if ok:
+            g.end_combat()
+            g.ledger.add(actor, "combat", f"{actor} 帶領隊伍脫離戰鬥")
+            lines.append("🏃 **隊伍趁亂脫離戰鬥！**")
+        else:
+            lines.append(f"❌ {actor} 被攔住了——戰鬥繼續")
+            _post_rotation(g)
+        return ResolveResult(lines)
+
+    if it.action == "observe":
+        # study an enemy: find the weak spot — the next attack against
+        # that target rolls with advantage (one-shot, like Help)
+        foe, tgt_char = resolve_target(g, it.target)
+        if foe is None:
+            foes = [f for f in g.enemies.values() if not f.dead]
+            if not foes:
+                return ResolveResult(["❓ 沒有可觀察的目標"], accepted=False)
+            foe = foes[0]
+        if not isinstance(getattr(g, "_aid", None), dict):
+            g._aid = {}
+        g._aid[foe.name] = True
+        g.ledger.add(actor, "observe",
+                     f"{actor} 盯著 {foe.name} 找破綻", target=foe.name)
+        _post_rotation(g)
+        return ResolveResult(
+            [f"👁 {actor} 觀察 **{foe.name}**——下一個攻擊它的隊友將有優勢"])
+
     # unknown / meta / aspiration: don't reject — show context + options
     # and let the narrator respond in-character to what the player said
     g.ledger.add(actor, it.action or "meta",
@@ -791,6 +851,9 @@ def _post_rotation(g: Game) -> None:
         if not g.alive(cur["name"]):
             g.advance()  # downed PC: their turn is skipped by the engine
             continue
+        # their turn arrives: the dodge stance ends (lasted one round)
+        if isinstance(getattr(g, "_dodge", None), dict):
+            g._dodge.pop(cur["name"], None)
         return
 
 

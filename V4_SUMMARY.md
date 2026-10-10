@@ -89,7 +89,7 @@ no-LLM fallback path.
 | `guards.py` | v3 defenses: placeholders, scrubbing, repetition, s2t |
 | `service.py` | Orchestration, per-channel games, persistence |
 
-## 6. Actions (16)
+## 6. Actions (19)
 
 | Action | Trigger | Engine behaviour |
 |---|---|---|
@@ -105,10 +105,13 @@ no-LLM fallback path.
 | `claim` | /explore (我升到99級) | Narrator responds, engine denies |
 | `meta` | /explore (目標/感受) | Narrator responds, scene context shown |
 | `chat` | plain text | Silently ignored (table talk) |
-| `rest` | /explore (休息) | Short: hit dice. Long: full restore |
+| `rest` | /explore (休息) | Short: hit dice + pact slots. Long: full restore |
 | `give` | /give | Transfer item between party members |
 | `check` | /explore (檢定) | Ability check; trailing skill word adds proficiency |
 | `pass` | /explore (等待) | Skip turn (combat) |
+| `defend` | /combat (🛡) | Dodge: enemy attacks vs you at disadvantage until your next turn; burns the turn |
+| `escape` | /combat (🏃) | DEX 12 → success: party leaves combat; fail: stay. No combat → rejected |
+| `observe` | /combat (👁) | Study a foe: next attack vs it gains advantage (one-shot); burns the turn |
 
 ## 6b. The 18-Skill System (all wired)
 

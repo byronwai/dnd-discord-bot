@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 # canonical action vocabulary the engine understands
 ACTIONS = ("attack", "move", "use", "cast", "talk", "search",
            "rest", "give", "check", "pass", "creative", "chat",
-           "take", "claim", "meta", "skill")
+           "take", "claim", "meta", "skill", "defend", "escape",
+           "observe")
 
 _VERBS = {
     "attack": ("攻擊", "打", "劈", "斬", "砍", "揼", "踢", "篤", "射",
@@ -27,6 +28,9 @@ _VERBS = {
     "check": ("檢定", "骰", "roll", "check"),
     "pass": ("等待", "跳過", "pass", "wait"),
     "skill": ("技能", "skill", "使出"),
+    "defend": ("防禦", "防御", "閃避", "defend", "dodge"),
+    "escape": ("撤退", "逃走", "走為上著", "escape", "flee", "retreat"),
+    "observe": ("觀察", "observe", "study", "研究敵人"),
 }
 
 # Cantonese aspect markers and particles to strip before verb matching
@@ -115,4 +119,6 @@ def parse_command(text: str, party_names=()) -> Intent | None:
             it.skill, it.target = parts
         elif parts:
             it.skill = parts[0]
+    elif action == "observe":
+        it.target = rest  # 「觀察 哥布林①」— find the weak spot on X
     return it
