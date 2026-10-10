@@ -61,3 +61,30 @@ def try_materialize(g, actor: str, name: str) -> bool:
                  f"世界補上了 {name}（回應 {actor} 的互動）",
                  item=name, scene=g.world.current, player=actor)
     return True
+
+
+# A3 organic search: mundane finds for scenes with nothing authored —
+# looking around SOMETIMES pays off (the v1 feel), never anything with
+# dice/value/plot weight
+_AMBIENT_PROPS = (
+    "纏著海草的空瓶", "生鏽的魚鉤", "乾燥的海星", "斷裂的船槳",
+    "佈滿鹽漬的木牌", "被磨圓的玻璃石", "褪色的布條", "完整的貝殼",
+    "焦黑的木炭", "磨損的皮繩圈")
+
+
+def ambient_find(g) -> str | None:
+    """~30% chance to hide one mundane prop in the current scene for
+    the search to reveal. Ledgered as a materialization."""
+    import random
+    if random.random() > 0.3:
+        return None
+    name = g._random.choice(_AMBIENT_PROPS)
+    s = g.world.here
+    if any(name in n or n in name for n, _ in
+           s.ground_items + s.hidden_items):
+        return None  # already here — don't stack the same prop
+    s.hidden_items.append((name, 1))
+    g.ledger.add("director", "materialize",
+                 f"搜索途中世界浮現了 {name}", item=name,
+                 scene=g.world.current)
+    return name

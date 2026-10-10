@@ -603,8 +603,12 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
 
     if it.action == "search":
         s = g.world.here
-        # nothing hidden here: no card, no roll — just the world saying
-        # so (v5 0b: don't make players roll to discover nothing)
+        # A3 organic search: nothing authored here — sometimes the
+        # world still has a mundane find to reveal (never with the
+        # 沒有特別的發現 dead-end every single time)
+        if not s.hidden_items:
+            from .director import ambient_find
+            ambient_find(g)
         if not s.hidden_items:
             g.ledger.add(actor, "search",
                          f"{actor} 仔細搜遍 {s.name}，一無所獲")
