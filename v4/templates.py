@@ -136,6 +136,10 @@ def render_hint(entry, game=None) -> str:
         return (f"那{item}靜靜躺在原地，彷彿它一直都在那裡——"
                 "只是直到此刻才被目光拾起。")
 
+    if kind == "scene_fire":
+        return ("火焰竄起的瞬間，濃煙遮住了半邊天——這地方燒起來了，"
+                "而且短期內不會停。")
+
     if kind == "observe":
         return f"{actor} 眯起眼睛盯著 {target}，不放過任何一絲破綻。"
 
@@ -158,7 +162,7 @@ def render_hint(entry, game=None) -> str:
 def scene_header(g) -> str:
     """Context bar: where, description, NPCs, exits."""
     s = g.world.here
-    lines = [f"📍 {s.name}"]
+    lines = [f"📍 {s.name}" + (" 🔥**火海中**" if s.fire else "")]
     if s.description:
         lines.append(f"   {s.description[:80]}")
     if s.npcs:

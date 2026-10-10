@@ -37,6 +37,7 @@ class Scene:
     ground_items: list = field(default_factory=list)  # (name, qty)
     search_dc: int = 12
     hidden_items: list = field(default_factory=list)  # revealed by search
+    fire: bool = False        # v5 A1: the scene is burning (engine state)
 
 
 @dataclass

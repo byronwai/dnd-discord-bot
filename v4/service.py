@@ -98,7 +98,8 @@ class V4Service:
                     "exits": s.exits, "npcs": s.npcs,
                     "ground_items": [list(x) for x in s.ground_items],
                     "search_dc": s.search_dc,
-                    "hidden_items": [list(x) for x in s.hidden_items]}
+                    "hidden_items": [list(x) for x in s.hidden_items],
+                    "fire": s.fire}
                     for sid, s in g.world.scenes.items()},
                 "current": g.world.current},
             "encounters": {sid: [asdict(f) for f in foes]
@@ -126,7 +127,8 @@ class V4Service:
                 npcs=s.get("npcs", []),
                 ground_items=[tuple(x) for x in s.get("ground_items", [])],
                 search_dc=s.get("search_dc", 12),
-                hidden_items=[tuple(x) for x in s.get("hidden_items", [])])
+                hidden_items=[tuple(x) for x in s.get("hidden_items", [])],
+                fire=s.get("fire", False))
         world.current = blob["world"]["current"]
         g = Game(blob["party"], world)
         for sid, foes in blob.get("encounters", {}).items():

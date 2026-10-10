@@ -118,7 +118,13 @@ class Digestor:
             '「我哋而家點算好？」→ {"paraphrase":"我們現在怎麼辦",'
             '"action":"meta","wants_help":true}\n'
             '「any ideas? stuck 咗」→ {"paraphrase":"卡住了，求建議",'
-            '"action":"meta","wants_help":true}\n\n'
+            '"action":"meta","wants_help":true}\n'
+            '「我掟個木雕落海」→ {"paraphrase":"把木雕扔進海裡",'
+            '"action":"creative","item":"木雕",'
+            '"utterance":"把木雕扔進海裡"}\n'
+            '「用火把點著張帆」→ {"paraphrase":"用火把點燃船帆",'
+            '"action":"creative","item":"火把",'
+            '"utterance":"用火把點燃船帆"}\n\n'
             "拿不準時，偏向遊戲動作（玩家的行動不能被漏掉）。\n"
             f'玩家輸入:「{text}」→')
         try:

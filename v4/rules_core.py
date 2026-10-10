@@ -425,6 +425,113 @@ def _enemy_turn(g: Game, foe) -> list[str]:
     return lines
 
 
+
+def _find_carried(g: Game, actor: str, text: str) -> str:
+    """Name of the actor's carried item mentioned in free text."""
+    for name, _ in g.inventory.get(actor, []):
+        if name and name in text:
+            return name
+    return ""
+
+
+def _throw(g: Game, actor: str, it: Intent, utter: str) -> ResolveResult | None:
+    """v5 A1: throw a carried (or just-materialized) thing.
+    At a combatant = improvised attack (d4, DEX). Otherwise it lands in
+    the scene — or the sea, where things stay gone."""
+    from engine.itemlib import affordances
+    name = it.item or _find_carried(g, actor, utter)
+    if not name:
+        return None  # not a throw of a thing
+    if "throwable" not in affordances(name):
+        return None
+    if not g.take_item(actor, name, 1):
+        # not carried: optimistic materialization first (v5 0a)
+        from .director import try_materialize
+        if not try_materialize(g, actor, name):
+            return None
+        for n, q in g.world.here.ground_items:
+            if name in n or n in name:
+                g.world.here.ground_items.remove((n, q))
+                break
+    foe, tgt_char = resolve_target(g, it.target or utter)
+    if foe is not None or tgt_char:
+        tname = foe.name if foe else tgt_char
+        ac = foe.ac if foe else g.ac_of(tgt_char)
+        bonus = total_mod(g.party[actor], "DEX", kind="check")
+        d = g.d20()
+        total = d + bonus
+        hit = d >= 20 or (d > 1 and total >= ac)
+        lines = [f"🎲 {actor} 掟出 {name}（臨時武器 1d4）："
+                 f"d20({d}){bonus:+d} = {total} vs AC {ac} → "
+                 f"{'✅ 命中' if hit else '❌ 未命中'}"]
+        g.ledger.add(actor, "attack", lines[0], target=tname, hit=hit)
+        if hit:
+            dmg, det = roll_expr("1d4")
+            lines.append(f"💥 傷害 1d4：{det} = **{dmg}**")
+            g.ledger.add(actor, "damage", f"{tname} 受到 {dmg} 傷害",
+                         target=tname, dmg=dmg)
+            if foe is not None:
+                foe.hp = max(0, foe.hp - dmg)
+                lines.append(f"　🗡 {foe.name} HP → **{foe.hp}/{foe.hp_max}**")
+                if foe.hp <= 0:
+                    foe.dead = True
+                    lines.append(f"💀 {foe.name} 倒下！")
+                    g.ledger.add(actor, "death", f"{foe.name} 倒下",
+                                 target=foe.name)
+                if g.check_end():
+                    lines.append("🏁 **戰鬥結束——敵人全滅！**")
+                    g.ledger.add(actor, "combat", "戰鬥結束（敵人全滅）")
+            elif tgt_char:
+                e = g.party[tgt_char]
+                e["hp_now"] = max(0, int(e["hp_now"]) - dmg)
+                lines.append(f"　💔 {tgt_char} HP → "
+                             f"**{e['hp_now']}/{e['hp_max']}**")
+        else:
+            # a miss still puts the item somewhere in the scene
+            g.world.here.ground_items.append((name, 1))
+        g.ledger.add(actor, "creative", f"{actor} 掟出 {name}",
+                     utterance=utter[:80], item=name)
+        return ResolveResult(lines)
+    # narrative throw: into the sea it's gone; otherwise it lands here
+    gone = re.search(r"海|水|河|崖|湖|深淵", utter)
+    if not gone:
+        g.world.here.ground_items.append((name, 1))
+    g.ledger.add(actor, "creative",
+                 f"{actor} 掟出 {name}"
+                 + ("（落入海中，消失了）" if gone else "（掉在場景裡）"),
+                 utterance=utter[:80], item=name)
+    where = "——永遠消失在海裡了" if gone else "——掉在地上，可以拾回"
+    return ResolveResult([f"🥏 {actor} 掟出 {name}{where}"])
+
+
+def _ignite(g: Game, actor: str, it: Intent, utter: str) -> ResolveResult | None:
+    """v5 A1: set the scene on fire. Needs a fire source (torch/light)
+    or flammable tinder; burning scenes tick 1 damage on every enemy at
+    round start while combat lasts."""
+    from engine.itemlib import affordances
+    carried = g.inventory.get(actor, [])
+    source = next((n for n, _ in carried if "light" in affordances(n)), "")
+    tinder = it.item or _find_carried(g, actor, utter)
+    if not source and tinder and "light" in affordances(tinder):
+        source, tinder = tinder, ""
+    if tinder and "flammable" not in affordances(tinder):
+        tinder = ""
+    if not source and not tinder:
+        return None  # nothing here can burn — falls back to a plain check
+    s = g.world.here
+    if s.fire:
+        return ResolveResult([f"🔥 {s.name} 已經在燒了——不需要再點"])
+    s.fire = True
+    lines = [f"🔥 {actor} 點燃了{tinder or source}——**{s.name} 陷入火海！**"]
+    if tinder and tinder != source:
+        g.take_item(actor, tinder, 1)  # the tinder is consumed
+    g.ledger.add(actor, "scene_fire", f"{actor} 點燃了 {s.name}",
+                 item=tinder or source, scene=g.world.current)
+    if g.combat.active:
+        lines += _post_rotation(g)
+    return ResolveResult(lines)
+
+
 def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
     """The one entry point: validate, mutate, ledger, render."""
     reason = validate(g, it)
@@ -650,6 +757,22 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         return ResolveResult(lines)
 
     if it.action == "creative":
+        # v5 A1 affordances: creative actions with real consequences
+        u = it.utterance or it.raw or ""
+        _THROW_RE = re.compile(r"掟|擲|丟|抛|扔|throw", re.I)
+        _FIRE_RE = re.compile(r"點燃|点火|放火|燒|烧|点燃|ignite|burn|set fire", re.I)
+        if _THROW_RE.search(u):
+            r = _throw(g, actor, it, u)
+            if r is not None:
+                if g.combat.active:
+                    r.lines += _post_rotation(g)
+                return r
+        if _FIRE_RE.search(u):
+            r = _ignite(g, actor, it, u)
+            if r is not None:
+                if g.combat.active:
+                    r.lines += _post_rotation(g)
+                return r
         # human-DM ruling: a plausible improvised method gets a real ability
         # check; success writes a fact the narrator dramatizes, failure gets
         # a light 吐槽. Never grants items/damage by itself — mechanical
@@ -875,6 +998,26 @@ def _post_rotation(g: Game) -> list[str]:
     out: list[str] = []
     if not g.combat.active:
         return out
+    # v5 A1: a burning scene scorches every enemy once per round
+    if g.world.here.fire and \
+            getattr(g, "_fire_round", None) != g.combat.round:
+        g._fire_round = g.combat.round
+        for foe in list(g.enemies.values()):
+            if not foe.dead:
+                foe.hp = max(0, foe.hp - 1)
+                out.append(f"🔥 火勢吞捲 {foe.name}：-1 HP → "
+                           f"**{foe.hp}/{foe.hp_max}**")
+                g.ledger.add("fire", "damage",
+                             f"{foe.name} 被火燒傷（1）",
+                             target=foe.name, dmg=1)
+                if foe.hp <= 0:
+                    foe.dead = True
+                    out.append(f"💀 {foe.name} 倒下！")
+                    g.ledger.add("fire", "death", f"{foe.name} 倒下",
+                                 target=foe.name)
+        if g.check_end():
+            out.append("🏁 **戰鬥結束——敵人全滅！**")
+            g.ledger.add("engine", "combat", "戰鬥結束（敵人全滅）")
     g.advance()
     guard = 0
     while g.combat.active and guard < 200:
