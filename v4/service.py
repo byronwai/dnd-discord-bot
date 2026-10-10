@@ -6,8 +6,19 @@ while every other channel keeps the v3 DM.
 """
 
 import json
+import logging
 import os
+import re
 from dataclasses import asdict
+
+log = logging.getLogger("dnd-bot")
+
+# player words that mean "I need help / what now" — triggers a narrator
+# directive to summarize and give concrete next steps
+_HELP_RE = re.compile(
+    r"幫|怎樣|怎麼|如何|點算|點樣|點做|做(咩|什麼|麽|么)|下一步|提示|線索|"
+    r"意見|建議|去哪|去邊|邊度|hint|help|what now|what should|now what|"
+    r"should we|advice", re.I)
 
 from .cli import META, build_demo_game
 from .digestor import Digestor
@@ -177,6 +188,17 @@ class V4Service:
                     list(g.world.here.exits.values()),
                     known_targets=list(g.enemies) +
                     [n["name"] for n in g.world.here.npcs] + list(g.party))
+        # digestor safety nets (live-game lessons):
+        # 1. talk with no words — the digestor found the NPC but dropped
+        #    WHAT was asked; keep the player's own words (the narrator
+        #    answers them and the ledger fact stays meaningful)
+        if it is not None and it.action == "talk" and not it.utterance:
+            it.utterance = (it.raw or "")[:120]
+        # 2. a move to nowhere（「下一步去哪？」misread as move）is a help
+        #    question, not an illegal move — re-route to meta so the
+        #    engine answers with exits + suggestions instead of denying
+        if it is not None and it.action == "move" and not it.destination:
+            it.action = "meta"
         # ownership: only the character's owner may act as that character
         if user_id and it:
             # no actor specified → default to the CALLER's character
@@ -267,6 +289,28 @@ class V4Service:
         if is_repetition(" ".join(safe_hints), self._recent_narrations):
             rep_hint = ("⚠️ 你最近的敘述幾乎相同——這次必須完全不同。"
                         "換一個場景細節、感官或節奏。")
+        # help directives (live-game lesson: players asking NPCs or the
+        # DM for help got atmosphere instead of information)
+        help_bits = []
+        if npc_knows and npc_name:
+            for e in g.ledger.entries[idx0:]:
+                if e.kind == "talk" and e.data.get("npc") == npc_name \
+                        and e.data.get("ok"):
+                    # a successful exchange must MOVE the story: the NPC
+                    # answers with actual information, as dialogue
+                    help_bits.append(
+                        f"玩家正在向 {npc_name} 尋求資訊——這段敘事必須讓"
+                        f"{npc_name}以對話形式明確說出至少一項上述已知"
+                        "事實，不能只描寫氣氛或敷衍。")
+                    break
+        if _HELP_RE.search(player_input):
+            from .templates import suggested_actions
+            opts = "；".join(suggested_actions(g, ""))[:220]
+            help_bits.append(
+                "玩家在向 DM 求助——先用一兩句總結現況，然後明確指出"
+                f"可行的下一步（例如：{opts}）。不要只描寫氣氛。")
+        directives = [d for d in (rep_hint, *help_bits) if d]
+        extra = "\n· ".join(directives) if directives else None
         # item inventory: what the narrator may mention
         s = g.world.here
         scene_items = ([n for n, _ in s.ground_items]
@@ -276,9 +320,13 @@ class V4Service:
         narration = await self.narrator.narrate(
             safe_facts, g.world.here.name, safe_brief, hints=safe_hints,
             npc_knows=safe_knows, npc_name=npc_name,
-            extra_directive=rep_hint, on_delta=on_delta,
+            extra_directive=extra, on_delta=on_delta,
             player_input=map_out(player_input, pmap),
             scene_items=scene_items, party_inventory=party_inv)
+        # review trail: log the pair so output quality is auditable
+        log.info("narrate | in=%.60s | hints=%d | out=%.80s",
+                 player_input.replace("\n", " "), len(hints),
+                 narration.replace("\n", " "))
         # force Traditional Chinese (models skew Simplified)
         try:
             from opencc import OpenCC

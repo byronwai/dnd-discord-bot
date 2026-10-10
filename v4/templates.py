@@ -90,7 +90,7 @@ def render_hint(entry, game=None) -> str:
         ], actor + str(item))
 
     if kind == "creative":
-        u = d.get("utterance", "大膽的嘗試")
+        u = d.get("utterance") or "大膽的嘗試"
         if d.get("ok"):
             return _pick([
                 f"{actor} 靈機一動——{u}——居然真的奏效了！",
@@ -109,7 +109,7 @@ def render_hint(entry, game=None) -> str:
 
     if kind == "talk" and d.get("npc"):
         npc = d.get("npc")
-        u = d.get("utterance", "交談")
+        u = d.get("utterance") or "交談"
         if d.get("ok"):
             return _pick([
                 f"{actor} 向 {npc} 表明來意——{npc} 沉吟片刻，開口回應。",
