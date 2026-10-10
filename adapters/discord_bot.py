@@ -758,8 +758,9 @@ class DiscordBot(discord.Client):
 
         async def _v4_turn(interaction, text, echo=None,
                            structured=False):
-            """Player v4 turn — v3-style UX with defer:
-            defer → echo → engine output (replaces placeholder) → narration"""
+            """Player v4 turn — v3 word-by-word UX:
+            defer → echo → engine verdict (instant) → narration streams
+            into its own message and STAYS there (final edit completes it)."""
             # defer FIRST: acknowledges the interaction (prevents 3s timeout)
             await interaction.response.defer(thinking=True)
             # echo — immediate, visible to everyone
@@ -767,36 +768,47 @@ class DiscordBot(discord.Client):
                 f"🎭 **{interaction.user.display_name}** "
                 f"{_clip(text, 200)}")
 
-            # 2. create narration placeholder (streams later)
-            narr_msg = await interaction.channel.send("📖 DM 正在寫作…")
+            narr_msg = [None]   # created once the verdict is posted
             last_edit = [0.0]
 
-            def on_delta(acc: str):
-                now = asyncio.get_event_loop().time()
-                if now - last_edit[0] >= 2.0 and len(acc) > 20:
-                    last_edit[0] = now
-                    asyncio.create_task(_edit_safe(narr_msg, acc))
+            async def on_resolved(lines):
+                # engine verdict: instant, its own message
+                await interaction.channel.send(_clip("\n".join(lines)))
+                # narration streams word-by-word into THIS message and
+                # keeps its streamed content (never replaced afterwards)
+                narr_msg[0] = await interaction.channel.send(
+                    "📖 DM 正在寫作…")
 
-            # 3. process the turn (engine instant, narrator streams)
+            def on_delta(acc: str):
+                msg = narr_msg[0]
+                if msg is None:
+                    return
+                now = asyncio.get_event_loop().time()
+                if now - last_edit[0] >= 2.0 and len(acc) > 12:
+                    last_edit[0] = now
+                    asyncio.create_task(_edit_safe(msg, acc))
+
             try:
                 lines, narration = await svc._v4_service(
                     str(interaction.channel_id)).handle(
                     text, interaction.user.display_name,
                     user_id=str(interaction.user.id),
                     structured=structured,
-                    on_delta=on_delta)
+                    on_delta=on_delta, on_resolved=on_resolved)
             except Exception as e:
                 log.exception("v4 turn failed")
-                await narr_msg.edit(content=f"⚠️ {e}")
+                if narr_msg[0] is not None:
+                    await narr_msg[0].edit(content=f"⚠️ {e}")
+                else:
+                    await interaction.followup.send(f"⚠️ {e}")
                 return
 
-            # 4. send engine output (replaces placeholder)
-            body = "\n".join(lines)
-            if body:
-                await narr_msg.edit(content=_clip(body))
-            # 5. narration as a follow-up message
-            if narration:
-                await interaction.channel.send("📖 " + _clip(narration))
+            # finalize the streamed message: guards may have scrubbed
+            # parts, so the last edit is authoritative; drop it entirely
+            # when the narrator produced nothing (degraded mode)
+            await _finalize_narr(narr_msg[0], narration)
+            if not narr_msg[0] and lines:
+                await interaction.channel.send(_clip("\n".join(lines)))
 
         async def _edit_safe(msg, content):
             try:
@@ -804,9 +816,23 @@ class DiscordBot(discord.Client):
             except discord.HTTPException:
                 pass
 
+        async def _finalize_narr(msg, narration: str):
+            """End state of the streamed narration message: the final
+            (guard-applied) text, or deleted when nothing was produced."""
+            if msg is None:
+                return
+            try:
+                if narration:
+                    await msg.edit(content=_clip("📖 " + narration))
+                else:
+                    await msg.delete()
+            except discord.HTTPException:
+                pass
+
         async def _v4_settle(interaction, expr, echo=""):
             """A d20 /roll that settles a pending check AUTO-CONTINUES the
-            story: die echo → engine verdict → narrator streams forward.
+            story: die echo → engine verdict (instant) → narration streams
+            word-by-word into its own message and stays.
             Returns True when it was a valid settle (command consumed)."""
             v4svc = svc._v4_service(str(interaction.channel_id))
             pend = getattr(v4svc.game, "_pending_check", None)
@@ -819,26 +845,37 @@ class DiscordBot(discord.Client):
             await interaction.channel.send(
                 f"🎲{tag} **{interaction.user.display_name}** "
                 f"d20 → **{die}**")
-            narr_msg = await interaction.channel.send("📖 DM 正在寫作…")
+
+            narr_msg = [None]
             last_edit = [0.0]
 
+            async def on_resolved(lines):
+                await interaction.channel.send(_clip("\n".join(lines)))
+                narr_msg[0] = await interaction.channel.send(
+                    "📖 DM 正在寫作…")
+
             def on_delta(acc: str):
+                msg = narr_msg[0]
+                if msg is None:
+                    return
                 now = asyncio.get_event_loop().time()
-                if now - last_edit[0] >= 2.0 and len(acc) > 20:
+                if now - last_edit[0] >= 2.0 and len(acc) > 12:
                     last_edit[0] = now
-                    asyncio.create_task(_edit_safe(narr_msg, acc))
+                    asyncio.create_task(_edit_safe(msg, acc))
 
             try:
-                lines, narration = await v4svc.settle_roll(die, on_delta)
+                lines, narration = await v4svc.settle_roll(
+                    die, on_delta=on_delta, on_resolved=on_resolved)
             except Exception as e:
                 log.exception("v4 roll settle failed")
-                await narr_msg.edit(content=f"⚠️ {e}")
+                if narr_msg[0] is not None:
+                    await narr_msg[0].edit(content=f"⚠️ {e}")
+                else:
+                    await interaction.followup.send(f"⚠️ {e}")
                 return True
-            body = "\n".join(lines)
-            if body:
-                await narr_msg.edit(content=_clip(body))
-            if narration:
-                await interaction.channel.send("📖 " + _clip(narration))
+            await _finalize_narr(narr_msg[0], narration)
+            if not narr_msg[0] and lines:
+                await interaction.channel.send(_clip("\n".join(lines)))
             return True
 
         async def _v4_admin(interaction, character, text):

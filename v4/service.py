@@ -112,13 +112,18 @@ class V4Service:
     async def handle(self, text: str, author: str = "",
                      user_id: str = "",
                      structured: bool = False,
-                     on_delta=None) -> tuple[list, str]:
+                     on_delta=None,
+                     on_resolved=None) -> tuple[list, str]:
         """Free-form text in → (engine lines, narration). Never raises.
         user_id: Discord uid — the engine enforces that only the character's
         owner can act as that character.
         structured: True = the text came from /combat (dropdown selections
         are already unambiguous) — skip the digestor entirely, construct
-        the Intent deterministically, confidence=1.0, no confirmation."""
+        the Intent deterministically, confidence=1.0, no confirmation.
+        on_resolved: async callback(lines) fired the moment the engine
+        verdict exists — BEFORE narration starts, so the adapter can post
+        the verdict instantly and stream the prose into its own message
+        (v3 word-by-word UX)."""
         g = self.game
         t = (text or "").strip()
         if not t:
@@ -185,6 +190,16 @@ class V4Service:
         r = resolve(g, it)
         if r.confirm is not None:
             self.pending = r.confirm
+        # v3 lesson: every turn ends with a hook — append before posting
+        if r.accepted and r.lines:
+            from .templates import render_turn_context
+            context = render_turn_context(g, it.actor or "")
+            r.lines.append("")
+            r.lines.append(context)
+        # engine verdict first: hand it to the adapter the moment it exists
+        # so the words-by-words narration can stream into its own message
+        if on_resolved and r.lines:
+            await on_resolved(r.lines)
         narration = ""
         if r.accepted and r.lines and self.pending is None:
             # v3 lesson: the narrator must answer the player's own words,
@@ -194,12 +209,6 @@ class V4Service:
                 player_input = text[:120]
             narration = await self._narrate(idx0, player_input, on_delta)
         self._save()
-        # v3 lesson: every turn ends with a hook — scene, status, options
-        if r.accepted and r.lines:
-            from .templates import render_turn_context
-            context = render_turn_context(g, it.actor or "")
-            r.lines.append("")
-            r.lines.append(context)
         return r.lines, narration
 
     # ---------- narration (shared by turns and roll settles) ----------
@@ -291,12 +300,15 @@ class V4Service:
         return narration
 
     async def settle_roll(self, die: int,
-                          on_delta=None) -> tuple[list[str], str]:
+                          on_delta=None,
+                          on_resolved=None) -> tuple[list[str], str]:
         """Settle the pending check with the player's own die, then
         AUTO-CONTINUE: the narrator immediately picks the story back up
         from the settled outcome (v3 lesson: /roll must never leave the
-        story hanging). Returns (engine lines, narration) — empty lines
-        when no check was pending (not a 'valid' settle)."""
+        story hanging). on_resolved fires with the verdict lines before
+        narration starts (instant verdict, streamed prose after).
+        Returns (engine lines, narration) — empty lines when no check
+        was pending (not a 'valid' settle)."""
         from .rules_core import resolve_pending_check
         g = self.game
         pend = getattr(g, "_pending_check", None)
@@ -312,14 +324,15 @@ class V4Service:
         lines = [f"🎲 **{actor}** d20 → **{die}**"]
         if line:
             lines.append(line)
+        # v3 lesson: every turn ends with a hook
+        from .templates import render_turn_context
+        lines.append("")
+        lines.append(render_turn_context(g, actor))
+        if on_resolved:
+            await on_resolved(lines)
         # auto-continue: the story reacts to the settled verdict now
         player_input = (f"{actor} 擲骰 d20={die}（{sk_zh}檢定"
                         + ("成功" if ok else "失敗") + "）")
         narration = await self._narrate(idx0, player_input, on_delta)
-        # v3 lesson: every turn ends with a hook
-        if lines:
-            from .templates import render_turn_context
-            lines.append("")
-            lines.append(render_turn_context(g, actor))
         self._save()
         return lines, narration

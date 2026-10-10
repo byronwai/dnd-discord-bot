@@ -159,15 +159,20 @@ Each Discord channel gets its own independent game:
 - Env: `V4_CHANNEL_IDS=<id1>,<id2>,...`
 - Everything isolated: characters, world, inventory, ledger
 
-## 9. Turn Output (v3-style streaming UX)
+## 9. Turn Output (v3-style word-by-word UX)
 
 ```
-t=0s   🎭 **PlayerName** action text          ← echo (immediate)
-t=0s   📖 DM 正在寫作…                         ← placeholder
-t=0s   🎲 engine result + 📍 scene + 👉 你可以  ← replaces placeholder
-t=2s   📖 海風鹹濕地吹拂著… ▍                    ← streaming (2s edits)
-t=10s  📖 full narration                       ← complete
+t=0s   🎭 **PlayerName** action text           ← echo (immediate)
+t=0s   🎲 engine verdict + 📍 scene + 👉 你可以   ← instant, its own message
+t=2s   📖 海風鹹濕地吹拂著… ▍                     ← narration STREAMS word-by-word
+t=10s  📖 full narration                       ← same message, final edit
 ```
+
+The streamed message keeps its content — the verdict never overwrites it
+(`on_resolved` hands the engine lines to the adapter the moment they
+exist; narration then streams into a separate message and is finalized
+there, or deleted in degraded mode). `/roll` settles follow the same
+layout via `settle_roll`.
 
 ## 10. What's Parked
 
