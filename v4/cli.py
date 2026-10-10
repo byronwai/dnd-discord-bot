@@ -144,18 +144,23 @@ def selftest() -> None:
     L.clear()
 
     # stealth: pending check -> PLAYER's own die -> effect applied
-    # (nat 20 always succeeds -> the unseen-attacker flag is set)
+    # (v5 0b: competent characters auto-succeed the passive check —
+    # either way the unseen-attacker flag must be set)
     run("依思 技能 潛行")
-    ok, line = _rpc(g, 20)
-    assert ok and getattr(g, "_stealth", {}).get("依思"), L
-    assert "潛行" in line, line
+    if getattr(g, "_pending_check", None):
+        ok, line = _rpc(g, 20)
+        assert ok
+    assert getattr(g, "_stealth", {}).get("依思"), L
+    print("  (stealth resolved)")
     L.clear()
 
     # insight: reveals the NPC's true disposition as an engine fact
     run("大力蕉 技能 洞察 老船長")
-    ok, line = _rpc(g, 20)
-    assert ok and any(e.kind == "insight" and e.data.get("npc") == "老船長"
-                      for e in g.ledger.entries), L
+    if getattr(g, "_pending_check", None):
+        ok, line = _rpc(g, 20)
+        assert ok
+    assert any(e.kind == "insight" and e.data.get("npc") == "老船長"
+               for e in g.ledger.entries), L
     L.clear()
     # --------------------------------------------------------------------
 
@@ -191,17 +196,12 @@ def selftest() -> None:
         assert any("輪到" in x for x in L), L
         L.clear()
 
-    # search on your turn: pending check → player rolls → resolved
+    # search on your turn: card for the dice or passive auto-success —
+    # either way a check lands in the ledger (effects apply in-engine)
     (await_turn("大力蕉") and run("大力蕉 搜索")) or run("依思 搜索")
-    # now the check is pending (player must /roll d20)
-    pend = getattr(g, "_pending_check", None)
-    if pend:
+    if getattr(g, "_pending_check", None):
         from v4.rules_core import resolve_pending_check
-        ok, line = resolve_pending_check(g, g.d20())
-        if ok and g.world.here.hidden_items:
-            for name, qty in g.world.here.hidden_items:
-                g.give_item(pend["actor"], name, qty)
-            g.world.here.hidden_items = []
+        resolve_pending_check(g, g.d20())
     assert any(e.kind == "check" for e in g.ledger.entries)
     L.clear()
 

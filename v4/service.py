@@ -295,7 +295,14 @@ class V4Service:
         if r.lines:
             self._unfinished = None  # new output supersedes the old;
             # _narrate below re-marks it if THIS turn's prose fails
-        if r.accepted and r.lines and self.pending is None:
+        # v5 0b: denials get narrated too — the narrator's 吐槽 answers
+        # the player instead of a dead-end 🚫. Rotation denials
+        # （現在輪到 X）stay engine-only: turn order is meta, prose
+        # there is noise.
+        rotation_only = any(
+            e.kind == "deny" and "輪到" in str(e.data.get("reason", ""))
+            for e in g.ledger.entries[idx0:])
+        if r.lines and self.pending is None and not rotation_only:
             # v3 lesson: the narrator must answer the player's own words,
             # especially when the engine denied something
             player_input = it.raw or it.utterance or ""

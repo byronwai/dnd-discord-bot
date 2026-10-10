@@ -260,8 +260,23 @@ def ability_check(g: Game, actor: str, ability: str, dc: int,
     auto=False shows a pending check card and waits for /roll —
     restoring v3's player-dice agency for /explore actions.
     effect: mechanical outcome ({kind, target, skill}) applied when the
-    check settles — on either path, exactly once."""
+    check settles — on either path, exactly once.
+    v5 0b (quiet engine): when the character's PASSIVE score (10+mod)
+    already clears a low DC, the check auto-succeeds with no roll —
+    friction only where the outcome is actually in doubt."""
     mod = total_mod(g.party[actor], ability, skill, "check")
+    if not auto and dc <= 12 and 10 + mod >= dc:
+        sk_zh = ""
+        from engine.charlib import SKILL_LABEL
+        if skill:
+            sk_zh = f"（{SKILL_LABEL.get(skill, skill)}）"
+        line = (f"✅ {actor} {ability}{sk_zh}：駕輕就熟"
+                f"（被動 {10 + mod} ≥ DC {dc}）——無需擲骰")
+        g.ledger.add(actor, "check", line, mod=mod, total=10 + mod,
+                     dc=dc, ok=True)
+        out = [line]
+        _apply_check_effect(g, actor, effect, True, out)
+        return True, "\n".join(out)
     if not auto:
         from engine.charlib import SKILL_LABEL
         need = max(1, dc - mod)
@@ -591,6 +606,13 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
 
     if it.action == "search":
         s = g.world.here
+        # nothing hidden here: no card, no roll — just the world saying
+        # so (v5 0b: don't make players roll to discover nothing)
+        if not s.hidden_items:
+            g.ledger.add(actor, "search",
+                         f"{actor} 仔細搜遍 {s.name}，一無所獲")
+            return ResolveResult(
+                [f"🔍 {actor} 仔細搜遍 {s.name}——沒有特別的發現"])
         _, line = ability_check(g, actor, "WIS", s.search_dc,
                                 "perception", auto=False,
                                 effect={"kind": "search"})
