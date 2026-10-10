@@ -822,6 +822,7 @@ class DiscordBot(discord.Client):
                     tag += " ☠中毒"
                 lines.append(f"  {n} {e.get('occupation', '?')}"
                              f" Lv{e.get('level', 1)}"
+                             f"（XP {e.get('xp', 0)}/{100 * int(e.get('level', 1))}）"
                              f" HP {e['hp_now']}/{e['hp_max']}{slot_txt}{tag}")
             for n, f in g.enemies.items():
                 if not f.dead:

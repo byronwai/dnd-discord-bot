@@ -331,6 +331,21 @@ def resolve_pending_check(g: Game, die: int) -> tuple[bool, str]:
     return ok, "\n".join(out)
 
 
+def _on_foe_death(g: Game, foe, lines: list):
+    """Loot into the scene + party XP (v2 mechanics back)."""
+    from engine.loot import drop_for, grant_xp
+    drops = drop_for(foe)
+    if drops:
+        for name, qty in drops:
+            g.world.here.ground_items.append((name, qty))
+        names = "、".join(f"{n}×{q}" for n, q in drops)
+        lines.append(f"💰 {foe.name} 掉落：**{names}**"
+                     "（落在地上，用 `/explore 執起`）")
+        g.ledger.add("engine", "loot", f"{foe.name} 掉落 {names}",
+                     items=drops, scene=g.world.current)
+    grant_xp(g, foe, lines)
+
+
 def _attack(g: Game, actor: str, target: str, move: str = "") -> ResolveResult:
     lines = []
     moves = compute_attack_moves(g.party[actor].get("occupation", ""),
@@ -415,6 +430,7 @@ def _attack(g: Game, actor: str, target: str, move: str = "") -> ResolveResult:
         if foe.hp <= 0:
             foe.dead = True
             lines.append(f"💀 {foe.name} 倒下！")
+            _on_foe_death(g, foe, lines)
             g.ledger.add(actor, "death", f"{foe.name} 倒下", target=foe.name)
         if g.check_end():
             lines.append("🏁 **戰鬥結束——敵人全滅！**")
@@ -510,6 +526,7 @@ def _throw(g: Game, actor: str, it: Intent, utter: str) -> ResolveResult | None:
                 if foe.hp <= 0:
                     foe.dead = True
                     lines.append(f"💀 {foe.name} 倒下！")
+                    _on_foe_death(g, foe, lines)
                     g.ledger.add(actor, "death", f"{foe.name} 倒下",
                                  target=foe.name)
                 if g.check_end():
@@ -1177,6 +1194,7 @@ def _post_rotation(g: Game) -> list[str]:
                 if foe.hp <= 0:
                     foe.dead = True
                     out.append(f"💀 {foe.name} 倒下！")
+                    _on_foe_death(g, foe, out)
                     g.ledger.add("fire", "death", f"{foe.name} 倒下",
                                  target=foe.name)
         if g.check_end():

@@ -19,12 +19,14 @@ class Enemy:
     dmg: str = "1d6"          # dice expression
     initiative: int = 0
     dead: bool = False
+    loot: list = field(default_factory=list)   # guaranteed drops (quest items)
 
     @classmethod
     def make(cls, name: str, hp: int, ac: int, attack_bonus: int = 3,
-             dmg: str = "1d6") -> "Enemy":
+             dmg: str = "1d6", loot: list = None) -> "Enemy":
         return cls(name=name, hp=hp, hp_max=hp, ac=ac,
-                   attack_bonus=attack_bonus, dmg=dmg)
+                   attack_bonus=attack_bonus, dmg=dmg,
+                   loot=loot or [])
 
 
 @dataclass

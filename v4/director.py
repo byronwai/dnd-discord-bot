@@ -65,20 +65,32 @@ def try_materialize(g, actor: str, name: str) -> bool:
 
 # A3 organic search: mundane finds for scenes with nothing authored —
 # looking around SOMETIMES pays off (the v1 feel), never anything with
-# dice/value/plot weight
+# dice/value/plot weight... except the rare real item below
 _AMBIENT_PROPS = (
     "纏著海草的空瓶", "生鏽的魚鉤", "乾燥的海星", "斷裂的船槳",
     "佈滿鹽漬的木牌", "被磨圓的玻璃石", "褪色的布條", "完整的貝殼",
-    "焦黑的木炭", "磨損的皮繩圈")
+    "焦黑的木炭", "磨損的皮繩圈",
+    # creative flavour finds (still mechanically inert)
+    "一枚刻著奇怪符號的硬幣（用不出去）", "缺頁的航海日誌",
+    "藏在貝殼裡的紙條", "停在奇怪時刻的鏽蝕懷錶",
+    "魚骨雕成的小梳", "鹽結晶的小雕像", "半截蠟封的信",
+    "綴著牙齒的項鍊（不是金的）")
+
+# the rare REAL find (~15% of finds) — usable gear
+_REAL_FINDS = ("治療藥水", "火把", "繩索", "匕首", "草藥包")
 
 
 def ambient_find(g) -> str | None:
-    """~30% chance to hide one mundane prop in the current scene for
-    the search to reveal. Ledgered as a materialization."""
+    """~30% chance to hide one find in the current scene for the search
+    to reveal: mostly flavour props, sometimes a genuinely useful item.
+    Ledgered as a materialization."""
     import random
     if random.random() > 0.3:
         return None
-    name = g._random.choice(_AMBIENT_PROPS)
+    if random.random() < 0.15:
+        name = g._random.choice(_REAL_FINDS)
+    else:
+        name = g._random.choice(_AMBIENT_PROPS)
     s = g.world.here
     if any(name in n or n in name for n, _ in
            s.ground_items + s.hidden_items):

@@ -102,6 +102,7 @@ def _apply_effect(g, eff: dict, out: list):
                     e.get("name", "敵人"), int(e.get("hp", 8)),
                     int(e.get("ac", 13)), int(e.get("attack_bonus", 3)),
                     e.get("dmg", "1d6"))
+            foe.loot = list(e.get("loot", []))   # authored quest drops
             from engine.cr import scale_for_party
             scale_for_party(foe, g.party)
             g.encounters.setdefault(s.id, []).append(foe)
