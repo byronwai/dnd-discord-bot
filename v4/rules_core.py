@@ -568,6 +568,29 @@ def _ignite(g: Game, actor: str, it: Intent, utter: str) -> ResolveResult | None
 
 def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
     """The one entry point: validate, mutate, ledger, render."""
+    # peel a trailing MOVE name off the target BEFORE validation
+    # （「攻擊 巴鐸的護衛 魔能爆」— otherwise validate sees the glued
+    # string, finds no target, and the move never separates from it)
+    if it.action == "attack" and it.target and not it.args.get("move"):
+        who = it.actor if it.actor in g.party else next(
+            (n for n in g.party if g.alive(n)), next(iter(g.party), None))
+        if who:
+            try:
+                _moves = compute_attack_moves(
+                    g.party[who].get("occupation", ""),
+                    int(g.party[who].get("level", 1)),
+                    [("item", n, q)
+                     for n, q in g.inventory.get(who, [])],
+                    g.max_slot(who))
+                for m in _moves:
+                    if it.target.endswith(m["name"]) \
+                            and len(it.target) > len(m["name"]):
+                        it.args["move"] = m["name"]
+                        it.target = it.target[:-len(m["name"])].strip(
+                            " ：:,，,")
+                        break
+            except Exception:
+                pass
     reason = validate(g, it)
     if reason:
         # item-from-nowhere: deny with a snark (human-DM 吐槽) — nothing
