@@ -134,13 +134,16 @@ class V4Service:
                      user_id: str = "",
                      structured: bool = False,
                      on_delta=None,
-                     on_resolved=None) -> tuple[list, str]:
+                     on_resolved=None,
+                     admin_actor: str = "") -> tuple[list, str]:
         """Free-form text in → (engine lines, narration). Never raises.
         user_id: Discord uid — the engine enforces that only the character's
         owner can act as that character.
         structured: True = the text came from /combat (dropdown selections
         are already unambiguous) — skip the digestor entirely, construct
         the Intent deterministically, confidence=1.0, no confirmation.
+        admin_actor: admin commands act as ANY character — overrides the
+        parsed actor and skips the ownership check.
         on_resolved: async callback(lines) fired the moment the engine
         verdict exists — BEFORE narration starts, so the adapter can post
         the verdict instantly and stream the prose into its own message
@@ -151,6 +154,8 @@ class V4Service:
             return [], ""
         if t in META:  # deterministic queries skip the LLM entirely
             return META[t](g), ""
+        if admin_actor and admin_actor not in g.party:
+            return ([f"❓ 沒有角色「{admin_actor}」"], "")
         it = None
         if self.pending is not None:
             low = t.lower().strip(" ！!。.")
@@ -208,8 +213,12 @@ class V4Service:
             it.args["kind"] = "long" if re.search(
                 r"長休|长休|long\s*rest|全休|過夜|过夜", raw, re.I) \
                 else "short"
+        # admin commands act as a chosen character: force the actor and
+        # skip the ownership gate entirely (validity checked up top)
+        if admin_actor and it is not None:
+            it.actor = admin_actor
         # ownership: only the character's owner may act as that character
-        if user_id and it:
+        if user_id and not admin_actor and it:
             # no actor specified → default to the CALLER's character
             if not it.actor:
                 it.actor = next(

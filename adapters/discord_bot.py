@@ -768,7 +768,7 @@ class DiscordBot(discord.Client):
                 text = f"{character} 撤退"
             else:
                 text = f"{character} 觀察"
-            await _v4_admin(interaction, character, text)
+            await _v4_admin(interaction, character, text, structured=True)
 
         @self.tree.command(name="roll-admin",
                            description="(Admin) 代擲 / roll for any character")
@@ -932,22 +932,50 @@ class DiscordBot(discord.Client):
                 await interaction.channel.send(_clip("\n".join(lines)))
             return True
 
-        async def _v4_admin(interaction, character, text):
-            """Admin v4 turn for any character — with public echo."""
+        async def _v4_admin(interaction, character, text,
+                            structured=False):
+            """Admin v4 turn for any character — SAME streaming UX as
+            player turns (the old admin path bypassed handle(): no
+            guards, no word-by-word, narration as one blob)."""
             await interaction.response.defer(thinking=True)
             # echo as the followup — resolves 「正在思考…」
             await interaction.followup.send(
                 f"🎛 **{interaction.user.display_name}** (admin) — "
                 f"**{character}** {_clip(text, 200)}")
+
+            narr_msg = [None]
+            last_edit = [0.0]
+
+            async def on_resolved(lines):
+                await interaction.channel.send(_clip("\n".join(lines)))
+                narr_msg[0] = await interaction.channel.send(
+                    "📖 DM 正在寫作…")
+
+            def on_delta(acc: str):
+                msg = narr_msg[0]
+                if msg is None:
+                    return
+                now = asyncio.get_event_loop().time()
+                if now - last_edit[0] >= 2.0 and len(acc) > 12:
+                    last_edit[0] = now
+                    asyncio.create_task(_edit_safe(msg, acc))
+
             try:
-                out = await svc._v4_admin_run(interaction, character, text)
+                lines, narration = await svc._v4_service(
+                    str(interaction.channel_id)).handle(
+                    text, f"{interaction.user.display_name} (admin)",
+                    structured=structured, admin_actor=character,
+                    on_delta=on_delta, on_resolved=on_resolved)
             except Exception as e:
                 log.exception("v4 admin turn failed")
-                await interaction.followup.send(f"⚠️ {e}")
+                if narr_msg[0] is not None:
+                    await narr_msg[0].edit(content=f"⚠️ {e}")
+                else:
+                    await interaction.followup.send(f"⚠️ {e}")
                 return
-            if out:
-                for msg in out:
-                    await interaction.followup.send(_clip(msg))
+            await _finalize_narr(narr_msg[0], narration)
+            if not narr_msg[0] and lines:
+                await interaction.channel.send(_clip("\n".join(lines)))
 
     # ------------------------------------------------------------------
     #  message handling: table talk only (no DM reply, no emoji)
@@ -971,37 +999,12 @@ class DiscordBot(discord.Client):
         # non-v4 channels: ignore (v3 is retired)
 
     async def _v4_admin_run(self, interaction, character, text):
-        """Execute admin-driven v4 turn; returns list of message strings."""
+        """Deprecated shim — admin turns now go through handle() with
+        admin_actor (guards + streaming). Kept only for external callers."""
         svc = self._v4_service(str(interaction.channel_id))
-        g = svc.game
-        if character not in g.party:
-            return [f"❓ 沒有角色「{character}」"]
-        from v4.intent import Intent, parse_command
-        it = parse_command(text, party_names=list(g.party))
-        if it is None or it.actor != character:
-            it = await svc.digestor.digest(
-                text, list(g.party), g.world.here.name,
-                list(g.world.here.exits.values()),
-                known_targets=list(g.enemies) +
-                [n["name"] for n in g.world.here.npcs] + list(g.party))
-        it.actor = character
-        from v4.rules_core import resolve as v4_resolve
-        r = v4_resolve(g, it)
-        out = r.lines
-        if r.accepted and r.lines:
-            from v4.templates import render_hint
-            recent = [e for e in g.ledger.entries
-                      if e.turn == g.ledger.turn][-6:]
-            hints = [h for h in (render_hint(e, g) for e in recent) if h]
-            facts = [e.text for e in recent]
-            brief = "；".join(f"{n} {e['hp_now']}/{e['hp_max']}HP"
-                             for n, e in g.party.items())
-            narr = await svc.narrator.narrate(
-                facts, g.world.here.name, brief, hints=hints)
-            if narr:
-                out = out + ["📖 " + narr]
-        svc._save()
-        return out
+        lines, _ = await svc.handle(
+            text, "admin", admin_actor=character)
+        return lines
 
 
 async def run_discord(token: str):
