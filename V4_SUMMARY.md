@@ -35,11 +35,11 @@ Player text ──→ [Digestor 12b] ──→ Intent JSON
 | `/explore text` — freeform action (digestor→engine) | `/combat-admin` |
 | `/confirm` — confirm pending action | `/roll-admin expr char` |
 | `/combat action target move` — RPG menu (no LLM) | `/give-admin char item qty` |
-| `/inventory [char]` — items + slots + moves | |
+| `/inventory [char]` — items + slots + moves + skills | |
 | `/roll [expr]` — dice (settles pending checks) | |
 | `/give item [to]` — transfer to party member | |
 | `/status` — party + scene | |
-| `/continue` — unstuck + scene context | |
+| `/continue` — finish unfinished narration (streams), else unstuck | |
 | `/help` | |
 
 **Channel keywords** (instant, no LLM): `status` `inv` `moves` `scene`

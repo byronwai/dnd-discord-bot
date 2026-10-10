@@ -13,6 +13,64 @@ class Narrator:
         self.url = llm_url.rstrip("/")
         self.model = model
 
+    async def _stream(self, prompt: str, on_delta=None,
+                      max_tokens: int = 400) -> str:
+        """Streaming chat completion — on_delta receives the growing text
+        as tokens arrive (v3 word-by-word UX)."""
+        import json as _json
+        body = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7, "max_tokens": max_tokens,
+            "stream": True}
+        text = ""
+        async with httpx.AsyncClient(timeout=180) as c:
+            async with c.stream(
+                    "POST", f"{self.url}/v1/chat/completions",
+                    json=body) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[6:].strip()
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        delta = _json.loads(payload)[
+                            "choices"][0]["delta"].get("content", "")
+                        if delta:
+                            text += delta
+                            if on_delta:
+                                try:
+                                    on_delta(text)
+                                except Exception:
+                                    pass
+                    except (KeyError, IndexError,
+                            _json.JSONDecodeError):
+                        continue
+        return text
+
+    async def continue_text(self, partial: str, on_delta=None) -> str:
+        """Resume narration that was cut off mid-output: continue the
+        prose from the breakpoint (no re-intro, no repetition)."""
+        prompt = (
+            "你正在為 D&D 遊戲擔任 DM，用繁體中文寫敘事。"
+            "先前的輸出被中斷了，已寫出的部分如下"
+            "（可能停在某句中間）：\n"
+            f"「{partial}」\n\n"
+            "請從中斷處自然地續寫下去，完成這段敘事：\n"
+            "· 直接續寫——不要重複已有文字、不要重新開頭、不要總結\n"
+            "· 約 60~120 字，最後留一個鉤子（疑問、選擇或暗示）\n"
+            "· 絕不寫出骰子數值或判定結果，不給予物品或傷害\n"
+            "· 繁體中文，絕不使用簡體字\n"
+            "=== 最後指示（最高優先）===\n"
+            "· 從「」內文字的斷點直接繼續，第一個字就是下一個字\n")
+        try:
+            return (await self._stream(prompt, on_delta,
+                                       max_tokens=220)).strip()
+        except Exception:
+            return ""
+
     async def narrate(self, facts: list, scene: str, party_brief: str,
                       hints: list = (), npc_knows: list = None,
                       npc_name: str = "",
@@ -117,40 +175,8 @@ class Narrator:
             + tail)
         try:
             if on_delta:
-                # streaming: call on_delta as tokens arrive (v3 UX)
-                import json as _json
-                body = {
-                    "model": self.model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.7, "max_tokens": 400,
-                    "stream": True}
-                text = ""
-                async with httpx.AsyncClient(timeout=180) as c:
-                    async with c.stream(
-                        "POST", f"{self.url}/v1/chat/completions",
-                        json=body
-                    ) as resp:
-                        resp.raise_for_status()
-                        async for line in resp.aiter_lines():
-                            if not line.startswith("data: "):
-                                continue
-                            payload = line[6:].strip()
-                            if payload == "[DONE]":
-                                break
-                            try:
-                                delta = _json.loads(payload)[
-                                    "choices"][0]["delta"].get(
-                                    "content", "")
-                                if delta:
-                                    text += delta
-                                    try:
-                                        on_delta(text)
-                                    except Exception:
-                                        pass
-                            except (KeyError, IndexError,
-                                    _json.JSONDecodeError):
-                                continue
-                return text.strip()
+                # streaming: on_delta receives the growing text (v3 UX)
+                return (await self._stream(prompt, on_delta)).strip()
             else:
                 # non-streaming (CLI, tests)
                 async with httpx.AsyncClient(timeout=180) as c:

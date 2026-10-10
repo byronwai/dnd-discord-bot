@@ -18,6 +18,10 @@ from .rules_core import resolve
 from .turn import Game
 from .world import Enemy, Scene, World
 
+# a narration that ends WITHOUT one of these was cut mid-sentence
+# (max_tokens cutoff / stream drop) -> /continue must finish it
+_END_PUNCT = "。．.!！?？…」』）)\"'"
+
 
 class V4Service:
     def __init__(self, data_dir: str, llm_url: str,
@@ -30,6 +34,10 @@ class V4Service:
         self.channel_id = channel_id
         self.digestor = Digestor(llm_url, digest_model)
         self.narrator = Narrator(llm_url, narr_model)
+        # narration that never finished (narrator silent, or prose cut
+        # mid-sentence): /continue resumes it before anything else.
+        # (init BEFORE _load — the saved blob may restore it)
+        self._unfinished = None
         self.game: Game = self._load() or build_demo_game()
         self.pending = None  # Intent awaiting the player's /confirm
         self._recent_narrations: list[str] = []  # v3: repetition guard
@@ -57,6 +65,7 @@ class V4Service:
             "inventory": g.inventory,
             "turn": g.ledger.turn,
             "entries": [asdict(e) for e in g.ledger.entries],
+            "unfinished": self._unfinished,
         }
         with open(self.path, "w", encoding="utf-8") as f:
             json.dump(blob, f, ensure_ascii=False, indent=1)
@@ -88,6 +97,7 @@ class V4Service:
         g.ledger.turn = blob.get("turn", 0)
         for e in blob.get("entries", []):
             g.ledger.entries.append(Entry(**e))
+        self._unfinished = blob.get("unfinished")
         return g
 
     # ---------- admin helpers ----------
@@ -201,6 +211,9 @@ class V4Service:
         if on_resolved and r.lines:
             await on_resolved(r.lines)
         narration = ""
+        if r.lines:
+            self._unfinished = None  # new output supersedes the old;
+            # _narrate below re-marks it if THIS turn's prose fails
         if r.accepted and r.lines and self.pending is None:
             # v3 lesson: the narrator must answer the player's own words,
             # especially when the engine denied something
@@ -289,6 +302,16 @@ class V4Service:
         # v3 guard: language check — if still not Chinese, degrade
         if narration and not is_chinese(narration):
             narration = ""  # reject non-Chinese output
+        # /continue bookkeeping on the SAFE (placeholder) text the LLM
+        # actually produced: empty = it never spoke; no terminal
+        # punctuation = the prose was cut mid-sentence (max_tokens /
+        # dropped stream) — both leave resumable state
+        raw = narration.strip().rstrip("*").rstrip()
+        if not raw or raw[-1] not in _END_PUNCT:
+            self._unfinished = {"text": narration, "idx0": idx0,
+                                "player_input": player_input}
+        else:
+            self._unfinished = None
         # v3 guard: restore real names before showing to players
         narration = map_in(narration, rmap)
         if not narration and hints:
@@ -330,6 +353,7 @@ class V4Service:
         lines.append(render_turn_context(g, actor))
         if on_resolved:
             await on_resolved(lines)
+        self._unfinished = None  # this settle supersedes; _narrate re-marks
         # auto-continue: the story reacts to the settled verdict now.
         # The narrator answers the player's ORIGINAL /explore words (what
         # created the check), with the die outcome appended — not a bare
@@ -341,3 +365,57 @@ class V4Service:
         narration = await self._narrate(idx0, player_input, on_delta)
         self._save()
         return lines, narration
+
+    # ---------- /continue: finish an unfinished narration first ----------
+
+    def has_unfinished(self) -> bool:
+        """True when the previous narration is resumable (and its ledger
+        slice still exists — a state reset invalidates it)."""
+        u = self._unfinished
+        return bool(u) and 0 <= u.get("idx0", -1) < len(
+            self.game.ledger.entries)
+
+    async def continue_narration(self, on_delta=None) -> tuple[bool, str]:
+        """Finish the previous unfinished narration, streaming word by
+        word. Truncated prose (cut mid-sentence) resumes from the exact
+        breakpoint via the narrator's continuation prompt; a silent
+        narrator re-narrates the same ledger slice. Returns
+        (continued, display_text) — (False, "") when there was nothing
+        to finish or the narrator is still down (caller falls back)."""
+        u = self._unfinished
+        if not u:
+            return False, ""
+        if not (0 <= u["idx0"] < len(self.game.ledger.entries)):
+            self._unfinished = None  # stale — the state was reset
+            self._save()
+            return False, ""
+        from .guards import (make_restore_map, map_in, scrub_narration,
+                             is_chinese)
+        if u["text"]:
+            # prose cut mid-sentence: continue from the breakpoint
+            cont = await self.narrator.continue_text(u["text"], on_delta)
+            try:
+                from opencc import OpenCC
+                cont = OpenCC("s2t").convert(cont)
+            except ImportError:
+                pass
+            cont, _ = scrub_narration(cont)
+            if cont and not is_chinese(cont):
+                cont = ""
+            if not cont:
+                return False, ""  # narrator still down
+            rmap = make_restore_map(list(self.game.party))
+            # if the continuation itself got cut, stay resumable
+            full = u["text"] + cont
+            raw = full.strip().rstrip("*").rstrip()
+            self._unfinished = (
+                {"text": full, "idx0": u["idx0"],
+                 "player_input": u["player_input"]}
+                if not raw or raw[-1] not in _END_PUNCT else None)
+            self._save()
+            return True, map_in(cont, rmap)
+        # the narrator never spoke: re-narrate the same turn from facts
+        narration = await self._narrate(u["idx0"], u["player_input"],
+                                        on_delta)
+        self._save()
+        return bool(narration), narration

@@ -55,7 +55,7 @@ HELP_TEXT = """🎲 **v4 引擎指令 / Commands**（11 個）
 
 `/status` — 隊伍 HP／法術格／場景／戰鬥狀態
 
-`/continue` — 遊戲卡住時推進（顯示待確認／戰鬥輪到誰／場景重述）
+`/continue` — 未完成的敘事先逐字續寫；否則推進遊戲（待確認／戰鬥輪到誰／場景重述）
 
 `/help` — 本說明
 
@@ -626,6 +626,31 @@ class DiscordBot(discord.Client):
             await interaction.response.defer(thinking=True)
             v4svc = svc._v4_service(str(interaction.channel_id))
             g = v4svc.game
+            # 1. unfinished narration? FINISH IT FIRST — word by word
+            if v4svc.has_unfinished():
+                narr_msg = await interaction.channel.send(
+                    "📖（續）DM 正在寫作…")
+                last_edit = [0.0]
+
+                def on_delta(acc: str):
+                    now = asyncio.get_event_loop().time()
+                    if now - last_edit[0] >= 2.0 and len(acc) > 6:
+                        last_edit[0] = now
+                        asyncio.create_task(_edit_safe(narr_msg, acc))
+
+                try:
+                    cont, text = await v4svc.continue_narration(on_delta)
+                except Exception:
+                    log.exception("continue narration failed")
+                    cont, text = False, ""
+                if cont and text:
+                    await narr_msg.edit(content=_clip("📖（續）" + text))
+                    return
+                try:  # nothing came of it — clean up, fall through
+                    await narr_msg.delete()
+                except discord.HTTPException:
+                    pass
+            # 2. original behaviour: pending / combat / scene nudge
             lines = []
             if v4svc.pending is not None:
                 p = v4svc.pending
