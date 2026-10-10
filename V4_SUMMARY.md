@@ -1,230 +1,131 @@
-# V4 Summary — Engine-Driven Architecture (Current)
+# V4 總結 — D&D DM Bot 第四形態（存檔文件）
 
-> Version: v4 (active) · Updated: 2026-10-11
-> Architecture: engine does 70% (rules, state, combat, dice), LLM does 30%
-> (reading intent, writing prose). Game fully playable without any LLM.
-> Full v1→v4 evolution: see `EVOLUTION.md`
+> 版本：**v4-final** · 封存日期：2026-10-10 19:30（GMT+8）
+> 範圍：v4 全程——2026-10-09 P1（純引擎）起，至 2026-10-10 深夜的 live 磨合馬拉松。
+> 真相源＝程式碼（GitHub byronwai/dnd-discord-bot，87 commits，v4 期約 84 個）
+> ＋ GB10 `data/v4_state_<channel>.json`（10-10 19:30 快照）。
+> v1→v4 演進全圖見 `EVOLUTION.md`；架構圖見 `ARCHITECTURE.md`。
 
 ---
 
-## 1. Architecture
+## 一、現況快照（封存時）
+
+| 項目 | 狀態 |
+|---|---|
+| 服務 | dm-bot + dnd-health **active**（GB10；gemma3:12b digestor / 27b narrator） |
+| 戰局 | 場景「海底祭壇」·turn 145 ·無戰鬥 ·ledger 291 條 |
+| 隊伍 | 依思 Warlock Lv2 HP 9/11（L1 0/2）·大力蕉 Druid Lv2 HP 11/11（L1 2/3） |
+| 劇情 | 與海妖女王結盟推進中：項鍊（巴鐸）→ 沉沒之城 → 海底祭壇救人；深海幽藍花仍未發現 |
+| 情報 | NPC knows/disclosed 追蹤上線；/status 已知情報可查 |
+| 指令 | 24 個（玩家 15 ·管理 9）；#dnd-health 指南 v2 已重發釘選 |
+| 規則 | `gamerules.json`＝單一事實源（基調＋canon＋敘事規範），注入 narrator |
+
+## 二、v4 的合約（相對 v3 的反轉）
+
+**引擎做 70%、LLM 做 30%**——v3 是「模型主持、引擎攔截」；v4 反轉為
+**引擎主持、模型點綴**：intent 解析（12b）與敘事潤飾（27b）是唯二的
+LLM 職務，且都是**無狀態、可拔除**的。`python v4/cli.py selftest`
+證明整局遊戲（戰鬥/物品/場景/檢定/技能/情報）零 LLM 可玩。
+引擎是唯一寫入路徑：LLM 連作弊的介面都不存在，v3 的攔截式防禦
+降級為輸出品質衛生（scrub/語言/重複/物品粗體）。
+
+## 三、回合管線（v4 最終形）
 
 ```
-Player text ──→ [Digestor 12b] ──→ Intent JSON
-         (or /combat dropdowns ──────→ Intent directly, no LLM)
-                                            │
-                                            ▼
-                                   [GAME ENGINE]     ←── no LLM needed
-                                   validate + resolve
-                                   dice · HP · items · combat · scenes
-                                            │
-                                   [Ledger] append-only facts
-                                            │
-                         ┌─────────────────┼─────────────────┐
-                         ▼                 ▼                 ▼
-                   [Templates]       [Narrator 27b]    [Debug Portal]
-                   skeleton prose     polish + flavour   #dnd-health
-                   (no LLM)          (guards applied)   log stream
+/explore 自由文字（粵/英/混）或 24 個型別指令
+  → scrub → digestor(12b)→Intent JSON（fallback：確定性解析器）
+  → 安全網（talk空話術回填/move無目的地→meta/rest種類嗅探/使用技能名→skill）
+  → resolve()：validate → 變異 → ledger（唯一事實流）
+     ·待決檢定攜帶 effect+origin（wants_help 也隨行）
+  → on_resolved：判謎即時貼出（引擎訊息）
+  → _narrate：骨架+事實+世界塊(gamerules)+守衛 → 27b 串流
+  → 逐字編輯進自己的訊息（最終編輯為準）；未完成→/continue 續寫
+/roll d20：結算待決卡 → 效果套用 → 以「玩家原話+判定」自動續寫劇情
+/combat 家族：/attack /use /skill /defend /flee /observe（各帶型別自動完成）
 ```
 
-## 2. Commands (24: 15 player + 9 admin)
+## 四、開發故事（84 commits 的教訓流）
 
-| Player | Admin |
-|---|---|
-| `/pc name occupation` — create character | `/explore-admin text char` |
-| `/explore text` — freeform action (digestor→engine) | `/attack-admin char target move` |
-| `/confirm` — confirm pending action | `/use-admin char item on` |
-| `/attack [target] [move]` — enemy-HP autocomplete | `/skill-admin char skill on` |
-| `/use [item] [on]` — item / feed a DOWNED ally | `/defend-admin` `/flee-admin` |
-| `/skill [skill] [on]` — 18 skills ★, context targets | `/observe-admin char target` |
-| `/defend` `/flee` `/observe [target]` | `/roll-admin expr char` |
-| `/inventory [char]` — items + slots + moves + skills | `/give-admin char item qty` |
-| `/roll [expr]` — dice (settles pending checks) | |
-| `/give item [to]` — transfer; no recipient = set down here | |
-| `/status` — party + scene + 📜 disclosed intel | |
-| `/continue` — finish unfinished narration (streams), else unstuck | |
-| `/help` | |
+**第一波（10-09）：反轉本身。** P1 純引擎＋selftest；P2 接上 12b/27b；
+playground 頻道驗證後直接換掉主頻道 v3。早期教訓：空隊伍 StopIteration、
+世界遷移 KeyError、`d20-2` 減號日一 bug。
 
-One typed command per combat action — each carries its own
-autocomplete (enemy HP, item ×qty, ★ skills, downed markers) instead of
-a single polymorphic `/combat` menu. #dnd-health republishes its pinned
-guide when `GUIDE_VERSION` bumps.
+**第二波（10-10 上午）：指令面重塑。** /say→/explore、對話式下拉→指令內
+清單、桌邊聊天靜默、擁有權閘門、/inventory、/give-autocomplete。
 
-**Channel keywords** (instant, no LLM): `status` `inv` `moves` `scene`
-**Plain text** = table talk (silently ignored)
+**第三波（10-10 下午）：18 技能全接線。** 原本只有察覺/說服會觸發。
+技能=帶效果的檢定（潛行→優勢、洞察→真實態度、醫藥→救醒、社交→態度階梯）；
+/combat 的「技能」原本誤走 cast 燒法術格。
 
-## 3. Input Paths
+**第四波（10-10 傍晚）：Discord 工程馬拉松**（今天最密集的一段）：
+1. 「該申請未受回應」三連（_announce/explore/inventory 舊匯入炸裂）→
+   defer-first 紀律＋樹級錯誤處理器（指令必答）
+2. 「正在思考…」幽靈——defer 後全走 channel.send，互動永無 followup →
+   echo 改為 followup
+3. 逐字輸出兩度失而復得：先修「串流訊息被判定覆蓋」（verdict 先貼、
+   串流訊息自留），再發現 admin 路徑根本沒接 on_delta → 統一 runner
+4. 休息雙 bug：長休被 LLM 路徑降級為短休（種類嗅探）；Warlock 契約格
+   短休不回（5e 應全回）——依思 0 法術格之謎
+5. 戰鬥紀錄：敵人反擊只進 ledger 不上屏——**擊倒依思的那一刀玩家看不見**；
+   _post_rotation 改為回傳行；倒地救援三路（餵藥/醫藥/建議提示）
+6. 「使用醫藥」被歸為物品使用→無中生有拒絕；use→skill 引擎側安全網＋別名
+7. 千兩黃金鸚鵡——**我自己的提示詞範例毒化了輸出**（小模型照抄範例字句）；
+   範例只示範結構＋防開頭重複指令
+8. 幻影木雕——narrator 憑空描述的道具，引擎裡從未存在，下回合自然消失；
+   記錄加寬、物品守衛上日誌、/give 不填對象改為放地上（可拾回）
+9. 玩家求助得到氣氛而非資訊：digestor 增 wants_help（按語意判斷，regex
+   只作無 LLM 後備）；空話術回填原話；「去哪」誤判 move→meta
+10. 情報系統：knows+disclosed，成功交流一次一滴新情報，/status 已知情報，
+    建議行動顯示 已問出 x/y
+11. /combat UI 推倒重來：多型 target 參數做不出對應自動完成 →
+    **拆成型別指令族**（玩家 6＋管理 6），/use 可在戰鬥中餵倒地隊友
+12. /roll 結算以「玩家原話＋判定」自動續寫；/continue 先補完未完成敘事
+13. gamerules.json 成為單一事實源（基調＋canon 注入 narrator，
+    canonical-tail 強制）；dnd-health 修好頻道盲區＋指南版本化重發
 
-| Path | Flow | LLM? |
-|---|---|---|
-| `/combat` (dropdowns) | Structured Intent directly → engine | None for intent |
-| `/explore` (freeform) | Scrub → digestor (12b) → Intent → engine | 12b for intent |
-| Fallback (digestor down) | Cantonese-aware keyword parser → Intent | None |
-| Channel keywords | Direct engine query | None |
+## 五、機制總表（速查）
 
-**Digestor** handles: Cantonese (劈/揼/篤/執/攞), English code-mixing
-("i picked a sword"), paraphrase to written Chinese first, action
-meanings (not just words). See `v4/digestor.py` prompt for the full
-action definition table. It also judges **`wants_help`** by meaning
-（「點算好」「stuck 咗」「any ideas?」）— intent reading is the LLM's
-job, not a keyword regex; the regex in `service.py` only backstops the
-no-LLM fallback path.
+- **指令**：玩家 15（/pc /explore /confirm /attack /use /skill /defend
+  /flee /observe /inventory /roll /give /status /continue /help）
+  管理 9（explore/attack/use/skill/defend/flee/observe/roll/give-admin）
+- **動作 19**：attack take move use cast talk skill search creative claim
+  meta chat rest give check pass defend escape observe
+- **技能 18**：全部有機械效果（見 §四第三波）；檢定=玩家骰（/explore）
+  或自動骰（/combat 家族）
+- **社交**：態度階梯 hostile→allied（引擎擁有）；情報一次一滴
+- **守衛**：placeholder 名、假骰 scrub、重複偵測、s2t、輸入消毒、
+  擁有權、NPC knows、物品粗體白名單、防開頭重複
+- **持久化**：每頻道一檔（party/world/encounters/combat/inventory/ledger/
+  unfinished）；gamerules.json 全域
 
-## 4. Dice Mechanics
+## 六、誠實邊界（v4 清單）
 
-| Path | Flow | Agency |
-|---|---|---|
-| `/combat` | Player picks action → engine rolls immediately | Consent by selection |
-| `/explore` (check) | Engine shows check card → player `/roll d20` → engine settles → **narrator auto-continues** (answering the player's ORIGINAL words + the verdict — the pending check carries `origin`) | Player rolls |
-| `/roll-admin` (d20) | Settles a pending check the same way, with auto-continue | Admin rolls |
-| `/explore` (take) | Engine moves ground item to inventory (no roll needed) | — |
-| `/explore` (talk NPC) | Friendly: no check. Else: social skill check card | Player rolls |
-| `/explore` (skill) | Skill check card → player `/roll d20` → effect applies | Player rolls |
-| `/explore` (claim) | "我升到99級" → narrator responds in-character, engine denies | — |
+- 死亡豁免、狀態、物品型錄、難度縮放：仍無（v5 種子）
+- narrator 無狀態：世界塊減輕但延續性僅靠 ledger；敘事本體不持久化
+  （僅 journald 前 200 字）
+- 待決檢定不跨重啟；gamerules 尚無每頻道覆寫
+- 防線偏輸出衛生（事實層免疫）；POV 漂移無防護
+- 測試僅 selftest（已固定種子）；部署仍是 scp＋systemd
 
-## 5. Core Modules (v4/)
+## 七、v5 backlog（已討論待實作）
 
-| Module | Responsibility |
-|---|---|
-| `intent.py` | Intent dataclass + deterministic parser (Cantonese-aware fallback) |
-| `world.py` | Scene graph, NPC (with `knows`), encounters |
-| `turn.py` | Game state: party, combat, inventory, spell slots |
-| `rules_core.py` | validate + resolve — the ONLY write path |
-| `ledger.py` | Append-only event log (replayable) |
-| `digestor.py` | 12b: freeform → Intent JSON (paraphrase, action meanings) |
-| `narrator.py` | 27b: skeletons + facts → prose (streaming, guards applied) |
-| `templates.py` | Prose skeletons + scene context + suggested actions |
-| `guards.py` | v3 defenses: placeholders, scrubbing, repetition, s2t |
-| `service.py` | Orchestration, per-channel games, persistence |
+1. `engine/itemlib.py` 物品型錄（DB 支撐）＋ Director（新型物件走型別
+   模板＋引擎閘門）——幻影木雕的根治
+2. 死亡豁免計數器、[cond:] 狀態、Inspiration（補償機制）
+3. 團體檢定、Help 正式化為優勢來源
+4. 敘事持久化（重播/審閱）、每頻道 gamerules 覆寫
+5. 回合卡按鈕混合 UI、SRD 檢索接線、CR 預算
+6. pytest＋fake-LLM 離線套件、狀態 schema 版本化遷移
 
-**`gamerules.json`** (repo root) — the single source of truth the LLMs
-stick to: world tone, canon facts（絕不得矛盾）, narration musts/forbiddens,
-social/combat house rules. The service distills it into a world block
-(tone + canon) injected at the head of every narrator prompt, with a
-canonical-tail rule enforcing it; missing file degrades gracefully.
+## 八、運維速查
 
-## 6. Actions (19)
-
-| Action | Trigger | Engine behaviour |
-|---|---|---|
-| `attack` | /combat, /explore | d20+bonus vs AC → damage → HP → death |
-| `take` | /explore (執/撿/pick) | Move ground/hidden item to inventory |
-| `move` | /explore (去/go) | Scene change + encounter check |
-| `use` | /combat, /explore | Apply item (potions heal, etc.) |
-| `cast` | /combat, /explore | Consume spell slot, narrate effect |
-| `talk` | /explore | Social check (skill-aware), disposition moves + intel drip, narrator voices NPC |
-| `skill` | /combat (技能), /explore | Named skill check with mechanical effect (below) |
-| `search` | /explore (搜索) | WIS(perception) check → reveal hidden items |
-| `creative` | /explore (自創) | Ability check for improvised method |
-| `claim` | /explore (我升到99級) | Narrator responds, engine denies |
-| `meta` | /explore (目標/感受) | Narrator responds, scene context shown |
-| `chat` | plain text | Silently ignored (table talk) |
-| `rest` | /explore (休息) | Short: hit dice + pact slots. Long: full restore |
-| `give` | /give | Transfer item between party members |
-| `check` | /explore (檢定) | Ability check; trailing skill word adds proficiency |
-| `pass` | /explore (等待) | Skip turn (combat) |
-| `defend` | /combat (🛡) | Dodge: enemy attacks vs you at disadvantage until your next turn; burns the turn |
-| `escape` | /combat (🏃) | DEX 12 → success: party leaves combat; fail: stay. No combat → rejected |
-| `observe` | /combat (👁) | Study a foe: next attack vs it gains advantage (one-shot); burns the turn |
-
-## 6b. The 18-Skill System (all wired)
-
-Defined in `engine/charlib.py` (`SKILL_ABILITY`, `CORE_SKILLS`,
-`SKILL_LABEL`); proficiency applied by `engine/checks.total_mod`.
-Triggered three ways — no LLM decides outcomes:
-
-1. **`/explore` freeform** — digestor maps Cantonese phrasing to a skill
-   （匿埋→stealth、嚇佢→intimidation、包紮→medicine、爬牆→athletics…）
-2. **`/combat` → ✨技能** — dropdown lists all 18, ★ = class-proficient
-3. **`/inventory`** — full sheet grouped by ability with ★ marks
-
-Mechanical effects (engine-owned facts the narrator dramatizes):
-
-| Skill | Effect on success |
-|---|---|
-| stealth | Unseen attacker: next attack rolls with advantage (one-shot) |
-| insight | Reveals NPC's true disposition + one thing they know |
-| medicine (DC 10) | Stabilizes a downed ally → HP 1, back on their feet |
-| perception / investigation | Reveals the scene's hidden items |
-| animal handling | Calms a creature: disposition +2 steps |
-| persuasion / deception / intimidation / performance | NPC disposition +1 step (intimidation adds fear) |
-| arcana / history / nature / religion | Knowledge fact gated by the check |
-| athletics / acrobatics / sleight of hand / survival | Contextual check (climb/balance/pick/track) |
-
-Social ladder (engine-owned): `hostile → suspicious → wary → neutral →
-negotiating → friendly → allied`. `talk` picks DC from disposition +
-skill; success steps the NPC up — the LLM only voices it.
-
-**Player dice**: `/explore` skills create a pending check card settled by
-the player's own `/roll d20` (effects apply at settle time — either path,
-exactly once). `/combat` skills auto-roll and burn the combat turn.
-
-## 6c. NPC Intel Tracking (knows + disclosed)
-
-Each NPC carries a `knows` list (facts they can reveal) AND a persisted
-`disclosed` list (facts the party has already pried out). The engine
-owns the drip — the narrator only voices what the engine released:
-
-| Event | Behaviour |
-|---|---|
-| Successful exchange (friendly talk / settled social check / insight) | Engine reveals exactly the NEXT unknown fact: ledgered (`reveal`), shown as a 📜 engine line, narrator directed to voice that exact fact in dialogue |
-| Failed social check | Nothing revealed |
-| NPC exhausted | 「沒有更多可透露的了」— honestly |
-
-Player visibility (no re-asking needed):
-- `/status` + `status` keyword → 📜 已知情報 section lists every
-  disclosed fact across all scenes
-- Turn-end suggestions show progress: `向 **船長** 打聽（已問出 2/4）`
-  → `情報已全部問出`
-
-**Help directives** (narrator): a settle/exchange carrying a `reveal`
-must speak that fact verbatim in dialogue; `wants_help` input gets a
-summarize-situation + concrete-next-steps directive built from the
-engine's own suggested actions. Pending (undecided) checks never get
-info directives — the outcome must not be spoiled before the roll.
-
-## 7. Guards (v3 Lessons Applied)
-
-| Guard | Prevents |
-|---|---|
-| Placeholder names `[PC1]` | Narrator transliterates characters |
-| Fake-dice scrubbing | Narrator writes dice results |
-| Repetition guard | Narrator spirals into identical outputs |
-| Language check + OpenCC s2t | Non-Chinese / Simplified output |
-| Input sanitization | `[PCn]` / `SYSTEM VERDICT` injection |
-| Ownership (user_id) | Player controls another's character |
-| NPC `knows` lists | Narrator invents quest content |
-| Scrub before digestor | Injection reaches the LLM |
-
-## 8. Per-Channel Games
-
-Each Discord channel gets its own independent game:
-- State: `v4_state_<channel_id>.json`
-- Env: `V4_CHANNEL_IDS=<id1>,<id2>,...`
-- Everything isolated: characters, world, inventory, ledger
-
-## 9. Turn Output (v3-style word-by-word UX)
-
-```
-t=0s   🎭 **PlayerName** action text           ← echo (immediate)
-t=0s   🎲 engine verdict + 📍 scene + 👉 你可以   ← instant, its own message
-t=2s   📖 海風鹹濕地吹拂著… ▍                     ← narration STREAMS word-by-word
-t=10s  📖 full narration                       ← same message, final edit
+```bash
+ssh -i keys/dnd_ed25519 <SSH_GB10>
+sudo systemctl restart dm-bot dnd-health
+cd ~/dnd-dm-bot && python3 v4/cli.py selftest     # 種子固定，可重放
+python3 v4/cli.py                                 # 零 LLM 遊玩證明
+journalctl -u dm-bot -f | grep -E "narrate|item guard"   # 敘事審閱軌跡
+# 狀態：data/v4_state_<channel_id>.json；規則：gamerules.json（改檔重啟即改世界）
 ```
 
-The streamed message keeps its content — the verdict never overwrites it
-(`on_resolved` hands the engine lines to the adapter the moment they
-exist; narration then streams into a separate message and is finalized
-there, or deleted in degraded mode). `/roll` settles follow the same
-layout via `settle_roll`.
-
-## 10. What's Parked
-
-| Feature | Status |
-|---|---|
-| Director (new objects) | Design ready — typed templates + engine gate |
-| Item catalog (`engine/itemlib.py`) | Design agreed — DB-backed items with the inventory guard; not built |
-| SRD retrieval | rules.db exists, not wired to v4 |
-| Difficulty scaling | Not in v4 world model |
-| Death save counters | Not implemented |
-| Conditions | Not implemented |
+*本文件隨 v4 封存產生；v5 開發請先讀本文件 → `V5_DESIGN.md` → `EVOLUTION.md`。*
