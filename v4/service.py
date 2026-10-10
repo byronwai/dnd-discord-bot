@@ -380,7 +380,7 @@ class V4Service:
             player_input=map_out(player_input, pmap),
             scene_items=scene_items, party_inventory=party_inv)
         # review trail: log the pair so output quality is auditable
-        log.info("narrate | in=%.60s | hints=%d | out=%.80s",
+        log.info("narrate | in=%.60s | hints=%d | out=%.200s",
                  player_input.replace("\n", " "), len(hints),
                  narration.replace("\n", " "))
         # force Traditional Chinese (models skew Simplified)
@@ -400,6 +400,11 @@ class V4Service:
         for fi in found_items:
             if fi not in scene_items:
                 scene_items.append(fi)
+        # observability: narrator-invented props (the phantom 木雕
+        # class of bug) — the DM sees what the guard let through
+        log.info("item guard | scene=%s known=%d found=%s",
+                 g.world.here.name, len(all_known),
+                 found_items or "—")
         if was_scrubbed_n:
             g.ledger.add("engine", "guard",
                          "已從敘事中清除假骰/判定文字")

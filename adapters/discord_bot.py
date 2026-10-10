@@ -605,10 +605,14 @@ class DiscordBot(discord.Client):
                 await interaction.response.send_message(
                     f"🎒 {giver} → {to}：{item}×1")
             else:
-                # no target specified: drop it
-                g.ledger.add(giver, "item", f"{giver} 丟棄了 {item}")
+                # no recipient: set it down HERE — it stays in the world
+                # (pickable with take) instead of being destroyed
+                g.world.here.ground_items.append((item, 1))
+                g.ledger.add(giver, "item",
+                             f"{giver} 把 {item} 放在 {g.world.here.name}")
                 await interaction.response.send_message(
-                    f"🎒 {giver} 丟棄了 {item}")
+                    f"🎒 {giver} 把 {item} 放在地上（{g.world.here.name}）"
+                    "——之後可以拾回")
             svc._v4_service(str(interaction.channel_id))._save()
 
         # ---- /status ----
