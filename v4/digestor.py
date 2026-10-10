@@ -23,40 +23,51 @@ class Digestor:
         tgt_line = (f"已知目標（盡量用這些精確名稱）: {'、'.join(known_targets)}\n"
                     if known_targets else "")
         prompt = (
-            "你是遊戲引擎的意圖解析器。把玩家的動作轉成「恰好一個」JSON 物件，"
-            "不要輸出其他文字。\n"
-            f"可用動作: {'|'.join(ACTIONS)}\n"
+            "你是遊戲引擎的意圖解析器。玩家輸入係香港粵語口語，"
+            "經常夾雜英文（例如「i picked a sword」「我 attack 佢」）。"
+            "先把輸入用書面中文重述（paraphrase），再判斷動作。\n"
+            "把玩家的動作轉成「恰好一個」JSON 物件，不要輸出其他文字。\n\n"
+            "動作定義（按意思，不只按字面）：\n"
+            "attack ＝企圖傷害或制服場上某人／生物（武器、拳腳、法術、擒拿）。\n"
+            "         擋、閃、恐嚇、大叫、追趕都唔算。撞門、劈鎖係對物件，"
+            "用 creative。\n"
+            "take   ＝拾起／拿走場景中嘅物件（執、撿、攞、pick up）。\n"
+            "move   ＝去另一個地方（去、前往、go to）。\n"
+            "talk   ＝同 NPC 說話或提問（傾計、問、ask）。\n"
+            "search ＝搜索、調查周圍環境。\n"
+            "use    ＝使用身上嘅物品。\n"
+            "cast   ＝施展法術或技能。\n"
+            "creative＝自創花招（對物件或環境嘅非標準動作）。\n"
+            "claim  ＝玩家宣稱自己得到能力、等級、物品（「我升到99級」）"
+            "——唔係真嘅動作。\n"
+            "meta   ＝願望、目標、感受、角色想法。\n"
+            "chat   ＝玩家之間嘅對話（唔係對 DM 講）。\n"
+            "pass   ＝等待、跳過。\n\n"
             f"玩家角色: {'、'.join(party_names)}\n"
             f"目前場景: {scene_name}"
             f"（通道: {'、'.join(exits) if exits else '無'}）\n"
             + tgt_line +
-            '欄位: {"action","actor","target","item","spell","destination",'
-            '"utterance","confidence"} — 用不到的欄位填空字串；'
-            "confidence 是 0~1 的把握值。\n"
-            '範例:「大力蕉，幫我砍那隻哥布林」→ '
-            '{"action":"attack","actor":"大力蕉","target":"哥布林","item":"",'
-            '"spell":"","destination":"","utterance":"","confidence":0.9}\n'
-            '範例:「我們去酒館吧」→ {"action":"move","actor":"",'
-            '"target":"","item":"","spell":"","destination":"酒館",'
-            '"utterance":"","confidence":0.9}\n'
-            "規則：若玩家提出「自創的花招或新方法」（不符標準動作、但故事上"
-            "合理可行，例如用魚叉勾住桅杆盪過去、把火把丟進水裡製造蒸汽），"
-            '輸出 {"action":"creative","utterance":"方法摘要",'
-            '"ability":"建議屬性(STR/DEX/CON/INT/WIS/CHA)","confidence":把握值}。\n'
-            "若玩家「無中生有掏出沒有的物品」（例如突然拿出火箭筒），照常輸出 "
-            "use+item——引擎會拒絕並吐槽。\n"
-            "交談規則：若玩家是「向特定 NPC 說話或提問」（對象是場景人物），"
-            "輸出 action=talk 並把 NPC 名填進 target；utterance 填「談話主題"
-            "或內容摘要」（描述意圖，不是逐字台詞），例如「詢問船長意見」→ "
-            'utterance:"詢問船長對下一步的意見"。\n'
-            "觀眾判定：只有當訊息是「對 DM 說的」（描述角色行動、與世界互動、"
-            "問 DM 問題）才當作遊戲動作。若訊息是「玩家之間的聊天／討論／玩笑」"
-            "（叫另一個玩家名字、現實話題、純建議或閒聊、策略討論而無實際行動），"
-            '輸出 {"action":"chat","utterance":"原文摘要"}。\n'
-            "規則：如果玩家說的是「願望、目標、感受、角色想法」"
-            "（例如「我想要變得更強」「我想成為海賊王」），"
-            '輸出 {"action":"meta","utterance":"原文"}'
-            "——引擎會讓 DM 回應。\n"
+            '欄位: {"paraphrase","action","actor","target","item",'
+            '"spell","destination","utterance"} — '
+            "paraphrase 係書面中文重述；用不到嘅欄位填空字串。\n\n"
+            "範例（真實粵語＋混英文）：\n"
+            '「我用劍劈小明」→ {"paraphrase":"用劍砍小明","action":"attack",'
+            '"actor":"","target":"小明","item":"劍"}\n'
+            '「揼佢一拳」→ {"paraphrase":"打他一拳","action":"attack",'
+            '"target":"最近的敵人"}\n'
+            '「篤爆個鎖」→ {"paraphrase":"撬開門鎖","action":"creative",'
+            '"utterance":"撬開門鎖"}\n'
+            '「執起地下把劍」→ {"paraphrase":"拾起地上的劍","action":"take",'
+            '"item":"劍"}\n'
+            '「i picked a sword」→ {"paraphrase":"拾起一把劍",'
+            '"action":"take","item":"劍"}\n'
+            '「我 attack 嗰隻 goblin」→ {"paraphrase":"攻擊那隻哥布林",'
+            '"action":"attack","target":"哥布林"}\n'
+            '「我升咗 99 級」→ {"paraphrase":"我升到了99級","action":"claim",'
+            '"utterance":"升到99級"}\n'
+            '「同老闆傾下計」→ {"paraphrase":"和老闆交談","action":"talk",'
+            '"target":"老闆"}\n'
+            '「周圍望下」→ {"paraphrase":"四處查看","action":"search"}\n\n'
             "拿不準時，偏向遊戲動作（玩家的行動不能被漏掉）。\n"
             f'玩家輸入:「{text}」→')
         try:

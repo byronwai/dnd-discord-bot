@@ -17,10 +17,12 @@ class Narrator:
                       hints: list = (), npc_knows: list = None,
                       npc_name: str = "",
                       extra_directive: str = None,
-                      on_delta=None) -> str:
+                      on_delta=None,
+                      player_input: str = "") -> str:
         """hints = engine prose skeletons; npc_knows = facts an NPC may
         reveal; extra_directive = turn-level hard rule; on_delta = streaming
-        callback for v3-style word-by-word UX.
+        callback; player_input = the player's own words this turn — the
+        first sentence of narration must respond to it.
         v3 lesson: most critical rules go at the END (canonical tail)."""
         if not facts:
             return ""
@@ -39,10 +41,20 @@ class Narrator:
                 "絕不得透露不在清單上的資訊（不得給予地點、物品、"
                 "攻略建議、劇情推測）；可以閒聊、可以拒絕回答、"
                 "可以要求交換條件。\n")
+        # v3 lesson: the player's own words must be answered, not ignored
+        player_block = ""
+        if player_input:
+            player_block = (
+                f"\n玩家這回合做／說了：「{player_input}」\n"
+                "第一句必須回應玩家這句話——如果引擎拒絕了，"
+                "讓角色大聲說出這句話並讓世界反應"
+                "（角色喊「我有千兩黃金」就讓他喊——世界怎樣反應是你的事）。\n")
+
         # v3 lesson: most critical rules at the END (small models attend
         # most to recent tokens — canonical tail principle)
         tail = (
-            "\n\n=== 最後指示（最高優先）===\n"
+            f"{player_block}"
+            "\n=== 最後指示（最高優先）===\n"
             "· 繁體中文，絕不使用簡體字\n"
             "· 絕不寫出任何骰子數值、算式或判定結果\n"
             "· 絕不給予物品、傷害或經驗（那是引擎的工作）\n")

@@ -133,6 +133,13 @@ class V4Service:
                 it = self.pending
                 it.args["confirmed"] = True
             self.pending = None  # anything else = changed their mind
+        # scrub input BEFORE the digestor sees it (fix: was after)
+        from .guards import scrub_input
+        clean_t, was_scrubbed = scrub_input(t)
+        if was_scrubbed:
+            g.ledger.add(author or "?", "deny",
+                         "已過濾可疑指令文字", reason="injection")
+        t = clean_t
         if t.startswith(("((", "//")):  # explicit out-of-character
             from .intent import Intent
             it = Intent(action="chat", utterance=t.lstrip("(/ "), raw=t)
@@ -175,12 +182,6 @@ class V4Service:
                     return ([f"🚫 {it.actor} 屬於其他玩家——"
                              "你不能控制這個角色。"], "")
         idx0 = len(g.ledger.entries)  # this turn's slice of the ledger
-        # player input scrubbing (v3: injection defense)
-        from .guards import scrub_input
-        clean_text, was_scrubbed = scrub_input(t)
-        if was_scrubbed:
-            g.ledger.add(author or "?", "deny",
-                         "已過濾可疑指令文字", reason="injection")
         r = resolve(g, it)
         if r.confirm is not None:
             self.pending = r.confirm
@@ -192,9 +193,15 @@ class V4Service:
                                  is_repetition, is_chinese)
             hints = [h for h in (render_hint(e, g)
                                  for e in g.ledger.entries[idx0:]) if h]
-            facts = [e.text for e in g.ledger.entries[idx0:]]
+            facts = [e.text for e in g.ledger.entries[idx0:]
+                     if e.kind != "table"]
             brief = "；".join(f"{n} {e['hp_now']}/{e['hp_max']}HP"
                              for n, e in g.party.items())
+            # v3 lesson: the narrator must answer the player's own words,
+            # especially when the engine denied something
+            player_input = it.raw or it.utterance or ""
+            if not player_input:
+                player_input = text[:120]
             # pass NPC knowledge constraints if this was a talk turn
             npc_knows, npc_name = None, ""
             for e in g.ledger.entries[idx0:]:
@@ -221,7 +228,8 @@ class V4Service:
             narration = await self.narrator.narrate(
                 safe_facts, g.world.here.name, safe_brief, hints=safe_hints,
                 npc_knows=safe_knows, npc_name=npc_name,
-                extra_directive=rep_hint, on_delta=on_delta)
+                extra_directive=rep_hint, on_delta=on_delta,
+                player_input=map_out(player_input, pmap))
             # force Traditional Chinese (models skew Simplified)
             try:
                 from opencc import OpenCC

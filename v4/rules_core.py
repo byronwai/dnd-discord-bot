@@ -75,9 +75,22 @@ def validate(g: Game, it: Intent) -> str | None:
     if it.action in ("use", "give") and actor:
         if not any(s[0] == it.item for s in g.inventory.get(actor, [])):
             return f"SLOT:item:{it.item}"  # fabrication -> snark + deny
+    if it.action == "take" and actor:
+        # valid only if the item exists in the scene (ground or hidden)
+        s = g.world.here
+        ground = [n for n, _ in s.ground_items]
+        hidden = [n for n, _ in s.hidden_items]
+        if not any(it.item and (it.item in n or n in it.item)
+                   for n in ground + hidden):
+            return f"SLOT:take:{it.item}"  # nothing to take -> snark + deny
     if it.action == "attack":
         foe, tgt_char = resolve_target(g, it.target)
         if foe is None and tgt_char is None:
+            # check scene NPCs — attacking one turns them hostile
+            for n in g.world.here.npcs:
+                if it.target and (it.target in n["name"]
+                                  or n["name"] in it.target):
+                    return None  # valid: NPC target (handled in resolve)
             return f"找不到目標「{it.target}」"
     return None
 
@@ -242,7 +255,22 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
                 [f"🚫 {actor} 沒有「{item}」",
                  "🎭 " + render_hint(g.ledger.entries[-1], g)],
                 accepted=False)
-        g.ledger.add(it.actor or "?", "deny", f"拒絕：{reason}", reason=reason)
+        if reason.startswith("SLOT:take:"):
+            item = reason.split("SLOT:take:", 1)[1]
+            actor = it.actor or next(iter(g.party))
+            g.ledger.add(actor, "deny",
+                         f"場景中沒有「{item}」可拾取",
+                         reason=f"沒有「{item}」可拾取",
+                         item=item, snark=True)
+            from .templates import render_hint
+            return ResolveResult(
+                [f"🚫 場景中沒有「{item}」可拾取",
+                 "🎭 " + render_hint(g.ledger.entries[-1], g)],
+                accepted=False)
+        g.ledger.add(it.actor or "?", "deny", f"拒絕：{reason}",
+                     reason=reason)
+        # v3 lesson: never ignore the player silently — the narrator
+        # must answer what the player said even when the engine denies it
         return ResolveResult([f"🚫 {reason}"], accepted=False)
     if it.action == "chat":
         # player-to-player table talk: remembered for context (ledger +
@@ -275,6 +303,28 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
                 [f"❓ 我理解你要：**{actor} 攻擊 {it.target}**"
                  f"——用 `/confirm` 執行，或 {alt}。"],
                 confirm=it)
+        # attacking a scene NPC: turn them hostile and start combat
+        foe, tgt_char = resolve_target(g, it.target)
+        if foe is None and tgt_char is None:
+            for n in g.world.here.npcs:
+                if it.target and (it.target in n["name"]
+                                  or n["name"] in it.target):
+                    from .world import Enemy
+                    enemy = Enemy.make(n["name"], 8, 13, 3, "1d6")
+                    g.encounters.setdefault(g.world.current, []).append(
+                        enemy)
+                    if not g.combat.active:
+                        g.start_encounter()
+                        g.ledger.add(actor, "combat",
+                                     f"{actor} 攻擊 {n['name']}——"
+                                     f"{n['name']} 變得敵對！")
+                    # remove the NPC from the friendly list
+                    g.world.here.npcs = [
+                        x for x in g.world.here.npcs
+                        if x["name"] != n["name"]]
+                    # re-resolve target (now in g.enemies)
+                    foe, tgt_char = resolve_target(g, it.target)
+                    break
         r = _attack(g, actor, it.target, it.args.get("move", ""))
         _post_rotation(g)
         return r
@@ -320,6 +370,25 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         g.give_item(to, it.item, 1)
         g.ledger.add(actor, "item", f"{actor} 把 {it.item} 給了 {to}")
         return ResolveResult([f"🎒 {actor} → {to}：{it.item}×1"])
+
+    if it.action == "take":
+        # pick up a ground item or a revealed hidden item
+        s = g.world.here
+        for name, qty in s.ground_items:
+            if it.item and (it.item in name or name in it.item):
+                s.ground_items.remove((name, qty))
+                g.give_item(actor, name, qty)
+                g.ledger.add(actor, "item", f"{actor} 拾起 {name}×{qty}")
+                return ResolveResult([f"🎒 {actor} 拾起 {name}×{qty}"])
+        for name, qty in s.hidden_items:
+            if it.item and (it.item in name or name in it.item):
+                s.hidden_items.remove((name, qty))
+                g.give_item(actor, name, qty)
+                g.ledger.add(actor, "item", f"{actor} 拾起 {name}×{qty}")
+                return ResolveResult([f"🎒 {actor} 拾起 {name}×{qty}"])
+        g.ledger.add(actor, "deny", f"場景中沒有「{it.item}」")
+        return ResolveResult([f"🚫 場景中沒有「{it.item}」可拾取"],
+                             accepted=False)
 
     if it.action == "search":
         s = g.world.here
