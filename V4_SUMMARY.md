@@ -34,10 +34,13 @@ Player text ──→ [Digestor 12b] ──→ Intent JSON
 | `/pc name occupation` — create character | `/explore-admin text char` |
 | `/explore text` — freeform action (digestor→engine) | `/combat-admin` |
 | `/confirm` — confirm pending action | `/roll-admin expr char` |
-| `/combat action target move` — RPG menu (no LLM) | `/give-admin char item qty` |
+| `/attack [target] [move]` — typed combat family | `/give-admin char item qty` |
+| `/use [item] [on]` — item / feed a DOWNED ally | |
 | `/inventory [char]` — items + slots + moves + skills | |
 | `/roll [expr]` — dice (settles pending checks) | |
-| `/give item [to]` — transfer to party member | |
+| `/give item [to]` — transfer; no recipient = set down here | |
+| `/skill [skill] [on]` — 18 skills ★, contextual targets | |
+| `/defend` `/flee` `/observe [target]` — dodge / disengage / weak spot | |
 | `/status` — party + scene | |
 | `/continue` — finish unfinished narration (streams), else unstuck | |
 | `/help` | |

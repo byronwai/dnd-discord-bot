@@ -1,7 +1,7 @@
 """Discord adapter — v4 engine-driven (11 commands).
 
 /explore  — freeform non-combat action (digest → engine → narrate)
-/combat   — RPG action menu via in-command autocomplete
+/attack /use /skill /defend /flee /observe — one typed command per combat action
 """
 
 import asyncio
@@ -39,9 +39,13 @@ HELP_TEXT = """🎲 **v4 引擎指令 / Commands**（11 個）
 　· 引擎即時判定（搜索/NPC對話/場景移動），敘事隨後補上
 　· 範例：`/explore 依思詢問船長關於巴鐸的線索`
 
-`/combat` — 戰鬥行動（RPG 選單，自動完成挑選目標和招式）
-　· action：⚔️攻擊 🎒物品 ✨技能 🛡防禦 🏃撤退 👁觀察
-　· 範例：`/combat action:攻擊 target:哥布林① move:詛咒木杖`
+**戰鬥指令 / Combat**（各指令有自己的自動完成清單）
+`/attack [目標] [招式]` — 攻擊（目標清單帶敵人 HP；招式按角色列出）
+`/use [物品] [隊友]` — 使用物品／餵隊友（**可救倒地隊友**）
+`/skill [技能] [對象]` — 技能（18 項，★＝熟練；對象含敵人/NPC/隊友）
+`/defend` — 防禦（敵人攻擊你有劣勢）
+`/flee` — 撤退（全隊嘗試脫離戰鬥）
+`/observe [敵人]` — 找破綻（下一擊有優勢）
 
 **18 項技能 / Skills**（`/inventory` 查看熟練項）
 `/explore` 直接描述即可：匿埋（潛行）、嚇佢（恐嚇）、睇穿佢（洞察）、
@@ -61,7 +65,8 @@ HELP_TEXT = """🎲 **v4 引擎指令 / Commands**（11 個）
 
 **管理員 / Admin**
 `/explore-admin <text> <char>` — 以任意角色探索
-`/combat-admin` — 以任意角色戰鬥（同 /combat 選單）
+`/attack-admin` `/use-admin` `/skill-admin` `/defend-admin` `/flee-admin`
+`/observe-admin` — 以任意角色執行對應戰鬥行動（自動完成同玩家版）
 `/roll-admin <expr> <char>` — 代擲
 `/give-admin <char> <item> [qty]` — 給物品
 
@@ -283,28 +288,6 @@ class DiscordBot(discord.Client):
             out.sort(key=lambda c: not c.name.startswith("★"))
             return out[:25]
 
-        async def combat_target_ac(interaction, current: str):
-            g = svc._v4_service(str(interaction.channel_id)).game
-            # the picked action decides what "target" means
-            act = _filled_param(interaction, "action")
-            if act == "skill":
-                return await skill_ac(interaction, current)
-            if act == "item":
-                return await item_ac(interaction, current)
-            entries = []
-            for name, foe in g.enemies.items():
-                if foe.dead:
-                    continue
-                hp = f" HP {foe.hp}/{foe.hp_max}" if foe.hp_max else ""
-                entries.append((f"{name}{hp}（敵）", name))
-            for n in g.party:
-                entries.append((f"{n}（玩家）", n))
-            if not entries:
-                entries.append(("AC 15（自訂）", "AC 15"))
-            q = (current or "").strip().lower()
-            return [app_commands.Choice(name=d[:100], value=v[:100])
-                    for d, v in entries if not q or q in d.lower()][:25]
-
         async def combat_move_ac(interaction, current: str):
             cid = str(interaction.channel_id)
             g = svc._v4_service(str(interaction.channel_id)).game
@@ -425,54 +408,156 @@ class DiscordBot(discord.Client):
                         "📖 " + _clip(map_in("\n".join(hints), rmap)))
             v4svc._save()
 
-        # ---- /combat ----
+        # ---- combat command family ----------------------------------------
+        # One command per action, each with its OWN typed autocomplete —
+        # a single /combat with a polymorphic `target` could never show
+        # enemy HP, item quantities and skill proficiency at once.
 
-        @self.tree.command(name="combat",
-                           description="戰鬥行動（RPG 選單）/ combat action menu")
-        @app_commands.describe(
-            action="選擇行動類型",
-            target="目標（清單挑選或自填 AC N）",
-            move="招式（依角色列出）")
-        @app_commands.choices(action=[
-            app_commands.Choice(name="⚔️ 攻擊 Attack", value="attack"),
-            app_commands.Choice(name="🎒 物品 Item", value="item"),
-            app_commands.Choice(name="✨ 技能 Skill", value="skill"),
-            app_commands.Choice(name="🛡 防禦 Defend", value="defend"),
-            app_commands.Choice(name="🏃 撤退 Escape", value="escape"),
-            app_commands.Choice(name="👁 觀察 Observe", value="observe"),
-        ])
-        @app_commands.autocomplete(target=combat_target_ac,
-                                   move=combat_move_ac)
-        async def combat_cmd(interaction: discord.Interaction,
-                             action: app_commands.Choice[str],
-                             target: str = "", move: str = ""):
+        async def _caller_char(interaction) -> str:
             g = svc._v4_service(str(interaction.channel_id)).game
-            if not g.combat.active and action.value not in ("observe",):
-                await interaction.response.send_message(
-                    "⚔️ 目前沒有戰鬥——用 `/explore` 行動。")
-                return
-            # find the caller's character
-            char = next((n for n, v in g.party.items()
-                         if str(v.get("owner_id", ""))
+            return next((n for n, v in g.party.items()
+                         if isinstance(v, dict)
+                         and str(v.get("owner_id", ""))
                          == str(interaction.user.id)), "")
+
+        async def enemy_ac(interaction, current: str):
+            g = svc._v4_service(str(interaction.channel_id)).game
+            entries = []
+            for name, foe in g.enemies.items():
+                if foe.dead:
+                    continue
+                entries.append((f"{name} HP {foe.hp}/{foe.hp_max}（敵）",
+                                name))
+            if not entries:
+                entries.append(("AC 15（自訂）", "AC 15"))
+            q = (current or "").strip().lower()
+            return [app_commands.Choice(name=d[:100], value=v[:100])
+                    for d, v in entries if not q or q in d.lower()][:25]
+
+        async def own_item_ac(interaction, current: str):
+            g = svc._v4_service(str(interaction.channel_id)).game
+            char = _filled_param(interaction, "character") \
+                or await _caller_char(interaction)
+            q = (current or "").strip().lower()
+            out = []
+            for name, qty in g.inventory.get(char, []):
+                note = "（回復 2d4+2 HP）" if "藥水" in name else ""
+                label = f"{name} ×{qty}{note}"
+                if not q or q in name.lower():
+                    out.append(app_commands.Choice(name=label[:100],
+                                                   value=name[:100]))
+            return out[:25]
+
+        async def ally_ac(interaction, current: str):
+            """Party members with HP — feeding a DOWNED ally is the
+            whole point of the `on` parameter."""
+            g = svc._v4_service(str(interaction.channel_id)).game
+            char = _filled_param(interaction, "character") \
+                or await _caller_char(interaction)
+            q = (current or "").strip().lower()
+            out = []
+            for n, e in g.party.items():
+                if not isinstance(e, dict):
+                    continue
+                hp, mx = int(e.get("hp_now", 0)), int(e.get("hp_max", 0))
+                tag = "（倒地！）" if hp <= 0 else ""
+                me = "（自己）" if n == char else ""
+                label = f"{n} {hp}/{mx}HP{tag}{me}"
+                if not q or q in label.lower():
+                    out.append(app_commands.Choice(name=label[:100],
+                                                   value=n[:100]))
+            return out[:25]
+
+        async def skill_on_ac(interaction, current: str):
+            """Context targets for a skill: enemies + NPCs + party."""
+            g = svc._v4_service(str(interaction.channel_id)).game
+            entries = []
+            for name, foe in g.enemies.items():
+                if not foe.dead:
+                    entries.append((f"{name} HP {foe.hp}/{foe.hp_max}（敵）",
+                                    name))
+            for n in g.world.here.npcs:
+                entries.append((f"{n['name']}（NPC）", n["name"]))
+            for n, e in g.party.items():
+                if isinstance(e, dict):
+                    hp = int(e.get("hp_now", 0))
+                    tag = "（倒地！）" if hp <= 0 else "（隊友）"
+                    entries.append((f"{n} {hp}/{e.get('hp_max', 0)}HP{tag}",
+                                    n))
+            q = (current or "").strip().lower()
+            return [app_commands.Choice(name=d[:100], value=v[:100])
+                    for d, v in entries if not q or q in d.lower()][:25]
+
+        @self.tree.command(name="attack",
+                           description="⚔️ 攻擊（戰鬥中）/ attack a target")
+        @app_commands.describe(target="目標（敵人清單）", move="招式")
+        @app_commands.autocomplete(target=enemy_ac, move=combat_move_ac)
+        async def attack_cmd(interaction: discord.Interaction,
+                             target: str, move: str = ""):
+            char = await _caller_char(interaction)
             if not char:
-                await interaction.response.send_message(
-                    "❓ 找不到你的角色。")
+                await interaction.response.send_message("❓ 找不到你的角色。")
                 return
-            act = action.value
-            text = ""
-            if act == "attack":
-                text = f"{char} 攻擊 {target}" + (f" {move}" if move else "")
-            elif act == "item":
-                text = f"{char} 使用 {target}"  # target dropdown lists items
-            elif act == "skill":
-                text = f"{char} 技能 {target}" + (f" 於 {move}" if move else "")
-            elif act == "defend":
-                text = f"{char} 防禦"
-            elif act == "escape":
-                text = f"{char} 撤退"
-            elif act == "observe":
-                text = f"{char} 觀察"
+            text = f"{char} 攻擊 {target}" + (f" {move}" if move else "")
+            await _v4_turn(interaction, text, structured=True)
+
+        @self.tree.command(name="use",
+                           description="🎒 使用物品／餵隊友（可救倒地）/ use item")
+        @app_commands.describe(item="物品（自己的背包）",
+                               on="給誰用（留空＝自己，可餵倒地隊友）")
+        @app_commands.autocomplete(item=own_item_ac, on=ally_ac)
+        async def use_cmd(interaction: discord.Interaction,
+                          item: str, on: str = ""):
+            char = await _caller_char(interaction)
+            if not char:
+                await interaction.response.send_message("❓ 找不到你的角色。")
+                return
+            text = f"{char} 使用 {item}" + (f" {on}" if on else "")
+            await _v4_turn(interaction, text, structured=True)
+
+        @self.tree.command(name="skill",
+                           description="✨ 技能（★＝熟練）/ use a skill")
+        @app_commands.describe(skill="技能（18 項，★＝熟練）",
+                               on="對象（敵人／NPC／隊友）")
+        @app_commands.autocomplete(skill=skill_ac, on=skill_on_ac)
+        async def skill_cmd(interaction: discord.Interaction,
+                            skill: str, on: str = ""):
+            char = await _caller_char(interaction)
+            if not char:
+                await interaction.response.send_message("❓ 找不到你的角色。")
+                return
+            text = f"{char} 技能 {skill}" + (f" {on}" if on else "")
+            await _v4_turn(interaction, text, structured=True)
+
+        @self.tree.command(name="defend",
+                           description="🛡 防禦（敵人攻擊你有劣勢）/ dodge")
+        async def defend_cmd(interaction: discord.Interaction):
+            char = await _caller_char(interaction)
+            if not char:
+                await interaction.response.send_message("❓ 找不到你的角色。")
+                return
+            await _v4_turn(interaction, f"{char} 防禦", structured=True)
+
+        @self.tree.command(name="flee",
+                           description="🏃 撤退（全隊脫離戰鬥）/ escape")
+        async def flee_cmd(interaction: discord.Interaction):
+            char = await _caller_char(interaction)
+            if not char:
+                await interaction.response.send_message("❓ 找不到你的角色。")
+                return
+            await _v4_turn(interaction, f"{char} 撤退", structured=True)
+
+        @self.tree.command(name="observe",
+                           description="👁 觀察敵人（下一擊有優勢）/ find a weak spot")
+        @app_commands.describe(target="觀察哪個敵人（留空＝第一個）")
+        @app_commands.autocomplete(target=enemy_ac)
+        async def observe_cmd(interaction: discord.Interaction,
+                              target: str = ""):
+            char = await _caller_char(interaction)
+            if not char:
+                await interaction.response.send_message("❓ 找不到你的角色。")
+                return
+            text = f"{char} 觀察" + (f" {target}" if target else "")
             await _v4_turn(interaction, text, structured=True)
 
         # ---- /inventory ----
@@ -527,7 +612,7 @@ class DiscordBot(discord.Client):
                     ("★" if s in prof else "") + SKILL_LABEL[s]
                     for s in by_ab.get(ab, []))
                 lines.append(f"  {ab}：{row}")
-            lines.append("　　（用 `/explore` 描述動作，或 `/combat` → 技能）")
+            lines.append("　　（用 `/explore` 描述動作，或 `/skill`）")
             # moves
             from engine.moves import (compute_attack_moves,
                                       move_spell_level)
@@ -691,7 +776,7 @@ class DiscordBot(discord.Client):
             if g.combat.active:
                 cur = g.combat.current()
                 if cur and not cur.get("npc"):
-                    lines.append(f"⚔️ 輪到 **{cur['name']}**——用 `/combat`")
+                    lines.append(f"⚔️ 輪到 **{cur['name']}**——用 `/attack` `/use` `/skill`")
             if not lines:
                 lines.append(f"🔄 場景：{g.world.here.name}")
                 if not g.party:
@@ -737,41 +822,88 @@ class DiscordBot(discord.Client):
                 return
             await _v4_admin(interaction, character, text)
 
-        @self.tree.command(name="combat-admin",
-                           description="(Admin) 以任意角色戰鬥 / combat as any character")
-        @app_commands.describe(character="角色", action="行動",
-                               target="目標", move="招式")
-        @app_commands.choices(action=[
-            app_commands.Choice(name="⚔️ 攻擊", value="attack"),
-            app_commands.Choice(name="🎒 物品", value="item"),
-            app_commands.Choice(name="✨ 技能", value="skill"),
-            app_commands.Choice(name="🛡 防禦", value="defend"),
-            app_commands.Choice(name="🏃 撤退", value="escape"),
-        ])
-        @app_commands.autocomplete(character=any_char_ac,
-                                   target=combat_target_ac,
+        # admin combat family — mirrors the player commands, acting as
+        # any character (same typed autocompletes, character-aware)
+
+        def _admin_only(interaction) -> bool:
+            return bool(interaction.user.guild_permissions.manage_guild)
+
+        @self.tree.command(name="attack-admin",
+                           description="(Admin) 以任意角色攻擊")
+        @app_commands.describe(character="角色", target="目標", move="招式")
+        @app_commands.autocomplete(character=any_char_ac, target=enemy_ac,
                                    move=combat_move_ac)
-        async def combat_admin_cmd(interaction: discord.Interaction,
-                                   character: str,
-                                   action: app_commands.Choice[str],
-                                   target: str = "", move: str = ""):
-            if not interaction.user.guild_permissions.manage_guild:
+        async def attack_admin_cmd(interaction: discord.Interaction,
+                                   character: str, target: str,
+                                   move: str = ""):
+            if not _admin_only(interaction):
                 await interaction.response.send_message("🚫 僅管理員。")
                 return
-            act = action.value
-            if act == "attack":
-                text = f"{character} 攻擊 {target}" + \
-                    (f" {move}" if move else "")
-            elif act == "item":
-                text = f"{character} 使用 {target}"
-            elif act == "skill":
-                text = f"{character} 技能 {target}"
-            elif act == "defend":
-                text = f"{character} 防禦"
-            elif act == "escape":
-                text = f"{character} 撤退"
-            else:
-                text = f"{character} 觀察"
+            text = f"{character} 攻擊 {target}" + (f" {move}" if move else "")
+            await _v4_admin(interaction, character, text, structured=True)
+
+        @self.tree.command(name="use-admin",
+                           description="(Admin) 以任意角色使用物品／餵隊友")
+        @app_commands.describe(character="角色", item="物品",
+                               on="給誰用（可餵倒地隊友）")
+        @app_commands.autocomplete(character=any_char_ac, item=own_item_ac,
+                                   on=ally_ac)
+        async def use_admin_cmd(interaction: discord.Interaction,
+                                character: str, item: str, on: str = ""):
+            if not _admin_only(interaction):
+                await interaction.response.send_message("🚫 僅管理員。")
+                return
+            text = f"{character} 使用 {item}" + (f" {on}" if on else "")
+            await _v4_admin(interaction, character, text, structured=True)
+
+        @self.tree.command(name="skill-admin",
+                           description="(Admin) 以任意角色使用技能")
+        @app_commands.describe(character="角色", skill="技能", on="對象")
+        @app_commands.autocomplete(character=any_char_ac, skill=skill_ac,
+                                   on=skill_on_ac)
+        async def skill_admin_cmd(interaction: discord.Interaction,
+                                  character: str, skill: str,
+                                  on: str = ""):
+            if not _admin_only(interaction):
+                await interaction.response.send_message("🚫 僅管理員。")
+                return
+            text = f"{character} 技能 {skill}" + (f" {on}" if on else "")
+            await _v4_admin(interaction, character, text, structured=True)
+
+        @self.tree.command(name="defend-admin",
+                           description="(Admin) 以任意角色防禦")
+        @app_commands.describe(character="角色")
+        @app_commands.autocomplete(character=any_char_ac)
+        async def defend_admin_cmd(interaction: discord.Interaction,
+                                   character: str):
+            if not _admin_only(interaction):
+                await interaction.response.send_message("🚫 僅管理員。")
+                return
+            await _v4_admin(interaction, character, f"{character} 防禦",
+                            structured=True)
+
+        @self.tree.command(name="flee-admin",
+                           description="(Admin) 以任意角色撤退")
+        @app_commands.describe(character="角色")
+        @app_commands.autocomplete(character=any_char_ac)
+        async def flee_admin_cmd(interaction: discord.Interaction,
+                                 character: str):
+            if not _admin_only(interaction):
+                await interaction.response.send_message("🚫 僅管理員。")
+                return
+            await _v4_admin(interaction, character, f"{character} 撤退",
+                            structured=True)
+
+        @self.tree.command(name="observe-admin",
+                           description="(Admin) 以任意角色觀察敵人")
+        @app_commands.describe(character="角色", target="觀察哪個敵人")
+        @app_commands.autocomplete(character=any_char_ac, target=enemy_ac)
+        async def observe_admin_cmd(interaction: discord.Interaction,
+                                    character: str, target: str = ""):
+            if not _admin_only(interaction):
+                await interaction.response.send_message("🚫 僅管理員。")
+                return
+            text = f"{character} 觀察" + (f" {target}" if target else "")
             await _v4_admin(interaction, character, text, structured=True)
 
         @self.tree.command(name="roll-admin",

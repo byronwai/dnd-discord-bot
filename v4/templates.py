@@ -202,7 +202,7 @@ def suggested_actions(g, actor: str = "") -> list[str]:
     if g.combat.active:
         cur = g.combat.current()
         if cur:
-            opts.append(f"⚔️ `/combat`（輪到 {cur['name']}）")
+            opts.append(f"⚔️ `/attack` `/use` `/skill`（輪到 {cur['name']}）")
     else:
         hurt = any(e.get("hp_now", 99) < e.get("hp_max", 1) // 2
                    for e in g.party.values() if isinstance(e, dict))
