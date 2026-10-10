@@ -8,9 +8,12 @@ touches game state. Uses the small fast digestor model (~1s).
 """
 
 import json
+import logging
 import re
 
 import httpx
+
+log = logging.getLogger("dnd-bot")
 
 
 class DirectorLLM:
@@ -59,9 +62,12 @@ class DirectorLLM:
             desc = str(d.get("description", "")).strip()
             npc = str(d.get("npc", "")).strip()
             if not (1 < len(name) <= 8) or not desc or len(desc) > 120:
+                log.warning("director gen_scene rejected shape: %r",
+                            {"name": name, "desc": desc[:40]})
                 return None
             return {"name": name, "description": desc, "npc": npc[:8]}
-        except Exception:
+        except Exception as e:
+            log.warning("director gen_scene failed: %s", e)
             return None
 
     async def gen_item(self, tone: str, scene_name: str,
@@ -83,7 +89,9 @@ class DirectorLLM:
             d = json.loads(m.group(0))
             name = str(d.get("name", "")).strip()
             if not (1 < len(name) <= 12):
+                log.warning("director gen_item rejected shape: %r", name)
                 return None
             return {"name": name}
-        except Exception:
+        except Exception as e:
+            log.warning("director gen_item failed: %s", e)
             return None
