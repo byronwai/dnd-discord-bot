@@ -122,6 +122,12 @@ def render_hint(entry, game=None) -> str:
     if kind == "talk":
         return entry.text
 
+    if kind == "reveal":
+        npc = d.get("npc", "對方")
+        fact = d.get("fact", "")
+        return (f"{npc} 壓低聲音，把「{fact}」原原本本告訴了 {actor}——"
+                "這是之前沒人知道的細節。")
+
     if kind == "skill":
         sk = d.get("skill", "")
         tgt = d.get("target", "")
@@ -157,9 +163,14 @@ def suggested_actions(g, actor: str = "") -> list[str]:
     # NPCs first (they're the story drivers)
     for n in s.npcs:
         knows = n.get("knows", [])
+        seen = n.get("disclosed", [])
         disp = n.get("disposition", "neutral")
         if knows:
-            opts.append(f"向 **{n['name']}** 打聽（知道 {len(knows)} 件事）")
+            if len(seen) >= len(knows):
+                opts.append(f"和 **{n['name']}** 閒聊（情報已全部問出）")
+            else:
+                opts.append(f"向 **{n['name']}** 打聽"
+                            f"（已問出 {len(seen)}/{len(knows)}）")
         elif disp == "hostile":
             opts.append(f"面對 **{n['name']}**（敵對）")
         else:

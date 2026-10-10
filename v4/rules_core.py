@@ -106,6 +106,23 @@ def _find_npc_in_text(g: Game, text: str):
     return None
 
 
+def _reveal_fact(g: Game, actor: str, npc: dict) -> str | None:
+    """Engine-owned info drip: one NEW fact per successful exchange.
+    Marks it disclosed (persisted with the NPC) and ledger-records it —
+    the narrator is then directed to voice exactly this fact. Players
+    see their progress, so nobody re-asks what's already answered."""
+    knows = npc.get("knows", [])
+    seen = npc.setdefault("disclosed", [])
+    fact = next((k for k in knows if k not in seen), None)
+    if fact is None:
+        return None
+    seen.append(fact)
+    g.ledger.add(actor, "reveal",
+                 f"{actor} 從 {npc['name']} 打聽到：{fact}",
+                 npc=npc["name"], fact=fact)
+    return fact
+
+
 def _apply_check_effect(g: Game, actor: str, effect: dict | None,
                         ok: bool, lines: list[str]) -> None:
     """Mechanical outcome of a settled check. Runs whether the die came
@@ -135,12 +152,14 @@ def _apply_check_effect(g: Game, actor: str, effect: dict | None,
         npc = _find_npc(g, effect.get("target", ""))
         if npc is not None:
             knows = npc.get("knows", [])
-            fact = (f"{actor} 看穿了 {npc['name']} 的真實態度："
-                    f"{_dispo_zh(npc.get('disposition', 'neutral'))}")
-            if knows:
-                fact += f"；並察覺對方知道「{knows[0]}」"
-            lines.append(f"👁 {fact}")
-            g.ledger.add(actor, "insight", fact, npc=npc["name"],
+            fact_txt = (f"{actor} 看穿了 {npc['name']} 的真實態度："
+                        f"{_dispo_zh(npc.get('disposition', 'neutral'))}")
+            # insight surfaces the NEXT unknown fact and marks it known
+            hit = _reveal_fact(g, actor, npc)
+            if hit:
+                fact_txt += f"；並察覺對方知道「{hit}」"
+            lines.append(f"👁 {fact_txt}")
+            g.ledger.add(actor, "insight", fact_txt, npc=npc["name"],
                          disposition=npc.get("disposition", "neutral"),
                          knows=knows[:3])
     elif kind == "stealth":
@@ -178,6 +197,10 @@ def _apply_check_effect(g: Game, actor: str, effect: dict | None,
                          f"{actor} 的{skill}奏效：{note}",
                          npc=npc["name"], skill=skill, ok=True,
                          disposition=npc["disposition"])
+            # a won exchange yields one NEW fact (engine-owned drip)
+            fact = _reveal_fact(g, actor, npc)
+            lines.append(f"📜 打聽到：**{fact}**" if fact
+                         else f"📜 {npc['name']} 沒有更多可透露的了")
 
 
 # ---------- validation ----------
@@ -615,6 +638,9 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
             else:
                 ok = True
                 lines.append(f"🤝 {npc['name']} 樂意回應")
+                fact = _reveal_fact(g, actor, npc)
+                lines.append(f"📜 打聽到：**{fact}**" if fact
+                             else f"（{npc['name']} 已把知道的都說了）")
             g.ledger.add(actor, "talk",
                          f"{actor} 向 {npc['name']}：{it.utterance}",
                          utterance=it.utterance, npc=npc["name"], ok=ok,

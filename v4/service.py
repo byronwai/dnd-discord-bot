@@ -266,11 +266,15 @@ class V4Service:
                  if e.kind != "table"]
         brief = "；".join(f"{n} {e['hp_now']}/{e['hp_max']}HP"
                          for n, e in g.party.items())
-        # pass NPC knowledge constraints if this was a talk/insight turn
+        # pass NPC knowledge constraints if this was a talk/insight turn;
+        # a reveal entry carries its own npc + the exact fact
         npc_knows, npc_name = None, ""
         for e in g.ledger.entries[idx0:]:
-            if e.kind in ("talk", "insight") and e.data.get("npc"):
+            if e.kind in ("talk", "insight", "reveal") \
+                    and e.data.get("npc"):
                 npc_name = e.data["npc"]
+                if e.kind == "reveal":
+                    break
                 if e.kind == "insight" and e.data.get("knows"):
                     # the engine already picked what insight reveals
                     npc_knows = e.data["knows"]
@@ -298,7 +302,16 @@ class V4Service:
         # the DIGESTOR by meaning (wants_help); the regex only backstops
         # the deterministic no-LLM path
         help_bits = []
-        if npc_knows and npc_name:
+        reveals = [e for e in g.ledger.entries[idx0:]
+                   if e.kind == "reveal"]
+        if reveals and npc_name:
+            # the engine already picked WHICH fact comes out this turn —
+            # the narrator must voice exactly it, as dialogue
+            fact = reveals[0].data.get("fact", "")
+            help_bits.append(
+                f"這段敘事必須讓 {npc_name} 以對話形式說出「{fact}」"
+                "——這是引擎判定打聽到的新情報，逐字融入對白。")
+        elif npc_knows and npc_name:
             for e in g.ledger.entries[idx0:]:
                 if e.kind == "talk" and e.data.get("npc") == npc_name \
                         and e.data.get("ok"):

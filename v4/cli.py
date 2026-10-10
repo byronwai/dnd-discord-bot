@@ -60,10 +60,21 @@ def _build_demo_world_party() -> Game:
     return g
 
 
+def _status(g: Game) -> list:
+    lines = [f"{n} {e['hp_now']}/{e['hp_max']}HP "
+             f"{e.get('occupation')} Lv{e.get('level',1)}"
+             for n, e in g.party.items()]
+    known = [f"📜 {n['name']}：{f}"
+             for s in g.world.scenes.values() for n in s.npcs
+             for f in n.get("disclosed", [])]
+    if known:
+        lines.append("已知情報：")
+        lines += known
+    return lines
+
+
 META = {
-    "status": lambda g: [f"{n} {e['hp_now']}/{e['hp_max']}HP "
-                         f"{e.get('occupation')} Lv{e.get('level',1)}"
-                         for n, e in g.party.items()],
+    "status": _status,
     "scene": lambda g: g.world.describe().splitlines(),
     "inv": lambda g: [f"{n}: " + (", ".join(f"{i}×{q}" for i, q in inv)
                                   or "（空）")

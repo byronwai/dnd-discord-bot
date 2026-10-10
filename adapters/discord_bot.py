@@ -616,6 +616,15 @@ class DiscordBot(discord.Client):
             for n, f in g.enemies.items():
                 if not f.dead:
                     lines.append(f"  👹 {n} {f.hp}/{f.hp_max} AC{f.ac}")
+            # intel the party has already pried out of NPCs (engine-tracked)
+            known = []
+            for sid, s in g.world.scenes.items():
+                for n in s.npcs:
+                    for f in n.get("disclosed", []):
+                        known.append(f"  📜 **{n['name']}**：{f}")
+            if known:
+                lines.append("📜 已知情報（打聽過的都在這裡，不用重問）")
+                lines += known
             await interaction.response.send_message("\n".join(lines)[:1900])
 
         # ---- /continue ----
