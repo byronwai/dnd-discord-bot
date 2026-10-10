@@ -205,6 +205,21 @@ def test_plot_ending_freezes():
     assert again == []
 
 
+def test_plot_enemy_dead_ledger_only():
+    """Production shape (live crash 'Entry has no attribute target'):
+    combat ended long ago — g.enemies empty, the death exists only as a
+    ledger entry. The condition must still match via data, not attrs."""
+    g = build_demo_game(seed=17)
+    plot = load_plot()
+    st = new_state(plot)
+    st["clocks"]["queen_patience"] = 0  # silence the other beat
+    g.ledger.add("大力蕉", "death", "巴鐸的護衛 倒下",
+                 target="巴鐸的護衛")
+    assert not g.enemies  # the fallback path is the ONLY path
+    lines, _ = plot_tick(g, plot, st)
+    assert any("巴鐸" in x for x in lines)
+
+
 # ---------- service-level (seeds 4/5) ----------
 
 class _FakeNarr:

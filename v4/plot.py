@@ -60,7 +60,7 @@ def _cond_met(g, cond: dict) -> bool:
     if "enemy_dead" in cond:
         foe = g.enemies.get(cond["enemy_dead"])
         return bool(foe and foe.dead) or bool(
-            not foe and any(cond["enemy_dead"] == e.target
+            not foe and any(cond["enemy_dead"] == (e.data or {}).get("target")
                             for e in g.ledger.entries
                             if e.kind == "death"))
     if "npc_gone" in cond:
