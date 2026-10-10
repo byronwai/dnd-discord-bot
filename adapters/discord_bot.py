@@ -718,9 +718,22 @@ class DiscordBot(discord.Client):
                 slots = e.get("slots") or {}
                 slot_txt = (" slots " + "·".join(
                     f"L{k}{v}" for k, v in slots.items())) if slots else ""
+                d = e.get("death") or {}
+                tag = ""
+                if d.get("dead"):
+                    tag = " 🪦已死"
+                elif int(e.get("hp_now", 1) or 0) <= 0:
+                    tag = (f" 🩶倒地（豁免 成{d.get('ok', 0)}/3"
+                           f"·敗{d.get('fail', 0)}/3）"
+                           + ("·已穩定" if d.get("stable") else ""))
+                conds = e.get("conds") or {}
+                if "inspired" in conds:
+                    tag += " ✨靈感"
+                if "poisoned" in conds:
+                    tag += " ☠中毒"
                 lines.append(f"  {n} {e.get('occupation', '?')}"
                              f" Lv{e.get('level', 1)}"
-                             f" HP {e['hp_now']}/{e['hp_max']}{slot_txt}")
+                             f" HP {e['hp_now']}/{e['hp_max']}{slot_txt}{tag}")
             for n, f in g.enemies.items():
                 if not f.dead:
                     lines.append(f"  👹 {n} {f.hp}/{f.hp_max} AC{f.ac}")
@@ -909,6 +922,27 @@ class DiscordBot(discord.Client):
                 return
             text = f"{character} 觀察" + (f" {target}" if target else "")
             await _v4_admin(interaction, character, text, structured=True)
+
+        @self.tree.command(name="inspire-admin",
+                           description="(Admin) 給角色靈感（一次性攻擊/檢定優勢）/ grant inspiration")
+        @app_commands.describe(character="角色（留空＝全隊）")
+        @app_commands.autocomplete(character=any_char_ac)
+        async def inspire_admin_cmd(interaction: discord.Interaction,
+                                    character: str = ""):
+            if not _admin_only(interaction):
+                await interaction.response.send_message("🚫 僅管理員。")
+                return
+            v4svc = svc._v4_service(str(interaction.channel_id))
+            g = v4svc.game
+            names = [character] if character in g.party else list(g.party)
+            for n in names:
+                g.add_cond(n, "inspired", None)
+            g.ledger.add("admin", "cond",
+                         f"管理員給了 {'、'.join(names)} 靈感")
+            v4svc._save()
+            await interaction.response.send_message(
+                f"✨ {'、'.join(names)} 獲得**靈感**——"
+                "下一次攻擊或引擎擲骰有優勢（用後即消耗）")
 
         @self.tree.command(name="roll-admin",
                            description="(Admin) 代擲 / roll for any character")

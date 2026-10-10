@@ -64,8 +64,54 @@ class Game:
             return 13
 
     def alive(self, name: str) -> bool:
-        hp = self.party[name].get("hp_now")
+        e = self.party[name]
+        if (e.get("death") or {}).get("dead"):
+            return False  # perma-dead: three failed death saves
+        hp = e.get("hp_now")
         return hp is None or int(hp) > 0
+
+    def downed(self, name: str) -> bool:
+        e = self.party.get(name) or {}
+        return (not (e.get("death") or {}).get("dead")
+                and int(e.get("hp_now", 1) or 0) <= 0)
+
+    # ---------- conditions (v5 seed 3) ----------
+    # e["conds"] = {name: rounds_left or None (= no expiry, e.g. 靈感)}
+
+    def conds(self, name: str) -> dict:
+        e = self.party[name]
+        if "conds" not in e or not isinstance(e["conds"], dict):
+            e["conds"] = {}
+        return e["conds"]
+
+    def add_cond(self, name: str, cond: str, rounds=None) -> None:
+        self.conds(name)[cond] = rounds
+
+    def has_cond(self, name: str, cond: str) -> bool:
+        return cond in self.conds(name)
+
+    def drop_cond(self, name: str, cond: str) -> bool:
+        """Remove and report presence — None is a VALID value (no-expiry
+        conditions like inspiration), so use a sentinel, not None."""
+        c = self.conds(name)
+        if cond in c:
+            del c[cond]
+            return True
+        return False
+
+    def tick_conds(self) -> list[str]:
+        """Round change: expire timed conditions. Returns notes."""
+        out = []
+        for n, e in self.party.items():
+            for cond in list(self.conds(n)):
+                left = e["conds"][cond]
+                if left is None:
+                    continue
+                e["conds"][cond] = int(left) - 1
+                if e["conds"][cond] <= 0:
+                    del e["conds"][cond]
+                    out.append(f"{n} 的{cond}效果結束了")
+        return out
 
     def give_item(self, char: str, item: str, qty: int = 1) -> None:
         for stack in self.inventory[char]:

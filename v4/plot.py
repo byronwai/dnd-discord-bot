@@ -101,6 +101,23 @@ def _apply_effect(g, eff: dict, out: list):
             out.append(f"👀 {e.get('name', '敵人')} 出沒於 {s.name}……")
     if "clock" in eff:
         pass  # handled by the caller (needs the state dict)
+    if "cond" in eff:
+        spec = eff["cond"]
+        who = spec.get("who", "")
+        names = [who] if who in g.party else list(g.party)
+        for n in names:
+            g.add_cond(n, spec.get("name", "poisoned"),
+                       spec.get("rounds"))
+        out.append(f"☠️ {'、'.join(names)} 受到{spec.get('name', 'poisoned')}"
+                   f"（{spec.get('rounds', '持續')} 回合）")
+        return
+    if "inspire" in eff:
+        who = (eff["inspire"] or {}).get("char", "")
+        names = [who] if who in g.party else list(g.party)
+        for n in names:
+            g.add_cond(n, "inspired", None)
+        out.append(f"✨ {'、'.join(names)} 獲得靈感（下一次攻擊有優勢）")
+        return
 
 
 def tick(g, plot: dict, state: dict) -> tuple[list[str], bool]:

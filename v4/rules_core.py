@@ -144,8 +144,10 @@ def _apply_check_effect(g: Game, actor: str, effect: dict | None,
     elif kind == "medicine":
         tgt = effect.get("target", "")
         e = g.party.get(tgt)
-        if e is not None and not g.alive(tgt):
+        truly_dead = bool((e or {}).get("death", {}).get("dead"))
+        if e is not None and not g.alive(tgt) and not truly_dead:
             e["hp_now"] = 1
+            e["death"] = {}   # revived: death counters reset
             lines.append(f"🩹 {tgt} 傷勢穩定，甦醒過來（HP 1）")
             g.ledger.add(actor, "heal", f"{actor} 救醒了 {tgt}",
                          target=tgt)
@@ -280,10 +282,17 @@ def ability_check(g: Game, actor: str, ability: str, dc: int,
                 + f" 檢定 vs DC {dc}（需骰 ≥ {need}）"
                 + f"\n👉 用 `/roll d20` 擲骰（修正值 {mod:+d} 自動套用）")
         return None, line
+    # v5 seed 3: inspiration also covers engine-rolled checks
+    inspired = g.drop_cond(actor, "inspired")
     d = g.d20()
+    if inspired:
+        d2 = g.d20()
+        d = max(d, d2)
     total = d + mod
     ok = d >= 20 or (d > 1 and total >= dc)
     line = _render_check(actor, ability, d, mod, total, dc, ok, skill)
+    if inspired:
+        line += "（✨靈感優勢已消耗）"
     g.ledger.add(actor, "check", line, d20=d, mod=mod, total=total,
                  dc=dc, ok=ok, skill=skill)
     out = [line]
@@ -345,14 +354,27 @@ def _attack(g: Game, actor: str, target: str, move: str = "") -> ResolveResult:
     aid_tgt = (foe.name if foe else tgt_char) or ""
     aided = bool(isinstance(getattr(g, "_aid", None), dict)
                  and g._aid.pop(aid_tgt, False))
+    # v5 seed 3: inspiration (compensation token) = one-shot advantage;
+    # poisoned = disadvantage. Both consumed/lasting per their rules.
+    inspired = g.drop_cond(actor, "inspired")
+    poisoned = g.has_cond(actor, "poisoned")
     d = g.d20()
+    rolls = [d]
     adv_note = ""
-    if stealthed or aided:
+    if stealthed or aided or inspired:
         d2 = g.d20()
+        rolls.append(d2)
         labels = ([] + (["潛行"] if stealthed else [])
-                  + (["破綻"] if aided else []))
+                  + (["破綻"] if aided else [])
+                  + (["靈感"] if inspired else []))
         adv_note = f"（{'＋'.join(labels)}優勢：{d}/{d2} 取高）"
-        d = max(d, d2)
+    if poisoned:
+        d3 = g.d20()
+        rolls.append(d3)
+        adv_note += f"（中毒劣勢：{min(rolls)}/{max(rolls)} 取低）"
+        d = min(rolls)
+    else:
+        d = max(rolls)
     total = d + bonus
     crit = d >= 20
     hit = crit or (d > 1 and total >= ac)
@@ -640,10 +662,15 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
                 break
         if _POTION.search(it.item):
             heal_who = tgt or actor
+            if (g.party[heal_who].get("death") or {}).get("dead"):
+                return ResolveResult(
+                    [f"🪦 {heal_who} 已經死了——藥水救不回來。"],
+                    accepted=False)
             dmg, det = roll_expr("2d4+2")
             e = g.party[heal_who]
             before = int(e["hp_now"])
             e["hp_now"] = min(int(e["hp_max"]), before + dmg)
+            e["death"] = {}   # revived: death counters reset
             g.take_item(actor, it.item, 1)
             if heal_who == actor:
                 g.ledger.add(actor, "heal", f"{actor} 喝下治療藥水，回復 "
@@ -990,6 +1017,41 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         accepted=True)
 
 
+def _death_save(g: Game, name: str, e: dict) -> list[str]:
+    """5e death saving throw, engine-rolled: <10 fail, >=10 success,
+    nat 1 = two fails, nat 20 = back at 1 HP. 3 stable / 3 dead."""
+    d = g.d20()
+    dd = e.get("death") or {}
+    if not all(k in dd for k in ("ok", "fail")):  # cleared/legacy dict
+        dd = {"ok": 0, "fail": 0, "stable": dd.get("stable", False),
+              "dead": dd.get("dead", False)}
+    e["death"] = dd
+    if d >= 20:
+        e["hp_now"] = 1
+        e["death"] = {}
+        line = (f"🩶 {name} 死亡豁免 d20={d}（天然 20！）——"
+                "硬生生撐了起來，HP 1！")
+        g.ledger.add(name, "death_save", line, d20=d, outcome="revive")
+        return [line]
+    fails = 2 if d <= 1 else 0
+    if d < 10:
+        dd["fail"] += 1 + fails
+        res = "失敗"
+    else:
+        dd["ok"] += 1
+        res = "成功"
+    line = (f"🩶 {name} 死亡豁免 d20={d} → {res}"
+            f"（成功 {dd['ok']}/3 · 失敗 {dd['fail']}/3）")
+    if dd["ok"] >= 3:
+        dd["stable"] = True
+        line += "——傷勢自行穩定了"
+    elif dd["fail"] >= 3:
+        dd["dead"] = True
+        line += f"——**{name} 死了。**"
+    g.ledger.add(name, "death_save", line, d20=d, outcome=res)
+    return [line]
+
+
 def _post_rotation(g: Game) -> list[str]:
     """After a PC action in combat: advance, auto-resolve NPC slots, and
     never park the rotation on a downed PC. RETURNS the enemy lines —
@@ -998,6 +1060,15 @@ def _post_rotation(g: Game) -> list[str]:
     out: list[str] = []
     if not g.combat.active:
         return out
+    # v5 seed 3: once per round — downed PCs roll death saves, timed
+    # conditions expire (same round-change hook as the fire tick)
+    if getattr(g, "_round_hook", None) != g.combat.round:
+        g._round_hook = g.combat.round
+        for n, e in g.party.items():
+            d = e.get("death") or {}
+            if g.downed(n) and not d.get("stable") and not d.get("dead"):
+                out += _death_save(g, n, e)
+        out += g.tick_conds()
     # v5 A1: a burning scene scorches every enemy once per round
     if g.world.here.fire and \
             getattr(g, "_fire_round", None) != g.combat.round:
