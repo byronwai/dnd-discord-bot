@@ -221,8 +221,9 @@ def suggested_actions(g, actor: str = "") -> list[str]:
                    for e in g.party.values() if isinstance(e, dict))
         if hurt:
             opts.append("🌿 休息恢復（`/explore 我們休息`）")
-        # creative prompt
-        opts.append("✨ 嘗試創意行動（`/explore` 描述任何想法）")
+        # creative prompt — concrete, because the engine HONORS these
+        opts.append("✨ 創意行動真的有用：掟嘢／放火／撒鹽搞亂敵人"
+                    "（下擊優勢）／臨時掩體（`/explore` 描述）")
     return opts[:5]
 
 

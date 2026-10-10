@@ -141,6 +141,22 @@ def _apply_check_effect(g: Game, actor: str, effect: dict | None,
             s.hidden_items = []
         else:
             lines.append("（仔細搜過，沒有特別的發現）")
+    elif kind == "creative_tactic":
+        # v5: a successful creative action leaves a REAL mark —
+        # fouled enemy (next attack vs it: advantage) or improvised
+        # cover (attacks vs the actor: disadvantage)
+        if effect.get("mode") == "aid" and effect.get("target"):
+            if not isinstance(getattr(g, "_aid", None), dict):
+                g._aid = {}
+            g._aid[effect["target"]] = True
+            lines.append(f"✨ {effect['target']} 被搞到陣腳大亂——"
+                         "下一次攻擊它有優勢")
+        elif effect.get("mode") == "dodge":
+            if not isinstance(getattr(g, "_dodge", None), dict):
+                g._dodge = {}
+            g._dodge[effect.get("target", actor)] = True
+            lines.append(f"✨ {actor} 的臨時掩體生效——"
+                         "敵人下一次攻擊他有劣勢")
     elif kind == "medicine":
         tgt = effect.get("target", "")
         e = g.party.get(tgt)
@@ -492,10 +508,9 @@ def _throw(g: Game, actor: str, it: Intent, utter: str) -> ResolveResult | None:
     name = it.item or _find_carried(g, actor, utter)
     if not name:
         return None  # not a throw of a thing
-    if "throwable" not in affordances(name):
-        return None
+    # physics: anything CARRIED can be thrown (splash the potion!);
+    # un-carried things only materialize if they're inert props
     if not g.take_item(actor, name, 1):
-        # not carried: optimistic materialization first (v5 0a)
         from .director import try_materialize
         if not try_materialize(g, actor, name):
             return None
@@ -851,7 +866,7 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
     if it.action == "creative":
         # v5 A1 affordances: creative actions with real consequences
         u = it.utterance or it.raw or ""
-        _THROW_RE = re.compile(r"掟|擲|丟|抛|扔|throw", re.I)
+        _THROW_RE = re.compile(r"掟|擲|丟|抛|扔|撒|潑|噴|倒向|throw", re.I)
         _FIRE_RE = re.compile(r"點燃|点火|放火|燒|烧|点燃|ignite|burn|set fire", re.I)
         if _THROW_RE.search(u):
             r = _throw(g, actor, it, u)
@@ -866,14 +881,25 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
                     r.lines += _post_rotation(g)
                 return r
         # human-DM ruling: a plausible improvised method gets a real ability
-        # check; success writes a fact the narrator dramatizes, failure gets
-        # a light 吐槽. Never grants items/damage by itself — mechanical
-        # effects still go through canonical actions.
+        # check — and in combat SUCCESS HAS TACTICAL CONSEQUENCES (v5:
+        # creative actions must be FELT, not a dead dice line): foul an
+        # enemy = the next attack against it has advantage; a defensive
+        # improvisation = attackers suffer disadvantage against you.
         ability = (it.ability or "DEX").upper()
         if ability not in ("STR", "DEX", "CON", "INT", "WIS", "CHA"):
             ability = "DEX"
         dc = int(it.args.get("dc", 12))
-        ok, line = ability_check(g, actor, ability, dc, auto=False)
+        tactic = None
+        if g.combat.active:
+            foe, _tc = resolve_target(g, it.target or u)
+            if foe is not None:
+                tactic = {"kind": "creative_tactic", "mode": "aid",
+                          "target": foe.name}
+            elif re.search(r"擋|躲|掩護|護住|防|格擋", u):
+                tactic = {"kind": "creative_tactic", "mode": "dodge",
+                          "target": actor}
+        ok, line = ability_check(g, actor, ability, dc, auto=False,
+                                 effect=tactic)
         g.ledger.add(actor, "creative",
                      f"{actor} 的花招（{it.utterance[:60]}）——"
                      + ("成功" if ok else "失敗"),
