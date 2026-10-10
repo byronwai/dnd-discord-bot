@@ -131,6 +131,11 @@ def render_hint(entry, game=None) -> str:
     if kind == "defend":
         return f"{actor} 收勢凝神，把武器橫在身前，門戶守得滴水不漏。"
 
+    if kind == "materialize":
+        item = d.get("item", "那件東西")
+        return (f"那{item}靜靜躺在原地，彷彿它一直都在那裡——"
+                "只是直到此刻才被目光拾起。")
+
     if kind == "observe":
         return f"{actor} 眯起眼睛盯著 {target}，不放過任何一絲破綻。"
 

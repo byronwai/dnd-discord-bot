@@ -221,14 +221,6 @@ def validate(g: Game, it: Intent) -> str | None:
     if it.action in ("use", "give") and actor:
         if not any(s[0] == it.item for s in g.inventory.get(actor, [])):
             return f"SLOT:item:{it.item}"  # fabrication -> snark + deny
-    if it.action == "take" and actor:
-        # valid only if the item exists in the scene (ground or hidden)
-        s = g.world.here
-        ground = [n for n, _ in s.ground_items]
-        hidden = [n for n, _ in s.hidden_items]
-        if not any(it.item and (it.item in n or n in it.item)
-                   for n in ground + hidden):
-            return f"SLOT:take:{it.item}"  # nothing to take -> snark + deny
     if it.action == "attack":
         foe, tgt_char = resolve_target(g, it.target)
         if foe is None and tgt_char is None:
@@ -449,18 +441,6 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
                 [f"🚫 {actor} 沒有「{item}」",
                  "🎭 " + render_hint(g.ledger.entries[-1], g)],
                 accepted=False)
-        if reason.startswith("SLOT:take:"):
-            item = reason.split("SLOT:take:", 1)[1]
-            actor = it.actor or next(iter(g.party))
-            g.ledger.add(actor, "deny",
-                         f"場景中沒有「{item}」可拾取",
-                         reason=f"沒有「{item}」可拾取",
-                         item=item, snark=True)
-            from .templates import render_hint
-            return ResolveResult(
-                [f"🚫 場景中沒有「{item}」可拾取",
-                 "🎭 " + render_hint(g.ledger.entries[-1], g)],
-                accepted=False)
         g.ledger.add(it.actor or "?", "deny", f"拒絕：{reason}",
                      reason=reason)
         # v3 lesson: never ignore the player silently — the narrator
@@ -600,9 +580,26 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
                 g.give_item(actor, name, qty)
                 g.ledger.add(actor, "item", f"{actor} 拾起 {name}×{qty}")
                 return ResolveResult([f"🎒 {actor} 拾起 {name}×{qty}"])
-        g.ledger.add(actor, "deny", f"場景中沒有「{it.item}」")
-        return ResolveResult([f"🚫 場景中沒有「{it.item}」可拾取"],
-                             accepted=False)
+        # v5 0a — default to YES: an untracked but mechanically inert
+        # prop（the narrator may have described it）materializes into
+        # the scene and the take succeeds. Dice/value/plot items stay
+        # snark-denied — those must come from the DM or a plot beat.
+        from .director import try_materialize
+        if it.item and try_materialize(g, actor, it.item):
+            for name, qty in s.ground_items:  # re-run: it's tracked now
+                if it.item in name or name in it.item:
+                    s.ground_items.remove((name, qty))
+                    g.give_item(actor, name, qty)
+                    g.ledger.add(actor, "item", f"{actor} 拾起 {name}×{qty}")
+                    return ResolveResult(
+                        [f"🎒 {actor} 拾起 {name}×{qty}——它一直都在那裡"])
+        g.ledger.add(actor, "deny", f"場景中沒有「{it.item}」",
+                     reason=f"沒有「{it.item}」", item=it.item, snark=True)
+        from .templates import render_hint
+        return ResolveResult(
+            [f"🚫 場景中沒有「{it.item}」可拾取",
+             "🎭 " + render_hint(g.ledger.entries[-1], g)],
+            accepted=False)
 
     if it.action == "search":
         s = g.world.here
