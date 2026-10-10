@@ -40,10 +40,15 @@ def xp_for(foe) -> int:
     return 10 * int(getattr(foe, "hp_max", 8) or 8) + 20
 
 
-def grant_xp(g, foe, lines: list):
-    """Party-wide XP; level-ups fire inline (HP up, slots refreshed)."""
-    xp = xp_for(foe)
-    for name, e in g.party.items():
+def add_xp(g, xp: int, lines: list = None, char: str = "") -> None:
+    """Grant XP (whole party, or one character) with inline level-ups:
+    HP cap up (hit-die-ish), spell slots refreshed, proficiency follows
+    via charlib. The DM lever (/xp-admin) and kill-XP share this path.
+    lines may be None for silent administration."""
+    lines = lines if lines is not None else []
+    who = [char] if char and char in g.party else list(g.party)
+    for name in who:
+        e = g.party[name]
         if not isinstance(e, dict):
             continue
         e["xp"] = int(e.get("xp", 0)) + xp
@@ -62,5 +67,10 @@ def grant_xp(g, foe, lines: list):
                 e.get("occupation", ""), int(e["level"])).items()}
             lines.append(f"🎉 **{name} 升到 Lv{e['level']}！**"
                          f" HP 上限 +{gain}、法術格已按新等級更新")
-    g.ledger.add("engine", "xp", f"全隊獲得 {xp} XP（擊敗 {foe.name}）",
-                 xp=xp, foe=foe.name)
+    g.ledger.add("engine", "xp", f"獲得 {xp} XP"
+                 + (f"（{char}）" if char else "（全隊）"), xp=xp)
+
+
+def grant_xp(g, foe, lines: list):
+    """Party-wide XP for a kill; level-ups fire inline."""
+    add_xp(g, xp_for(foe), lines)

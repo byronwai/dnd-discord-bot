@@ -1034,6 +1034,29 @@ class DiscordBot(discord.Client):
                 f"✨ {'、'.join(names)} 獲得**靈感**——"
                 "下一次攻擊或引擎擲骰有優勢（用後即消耗）")
 
+        @self.tree.command(name="xp-admin",
+                           description="(Admin) 給 XP（自動升級）/ grant XP with level-ups")
+        @app_commands.describe(amount="XP 量（可負數）", character="角色（留空＝全隊）")
+        @app_commands.autocomplete(character=any_char_ac)
+        async def xp_admin_cmd(interaction: discord.Interaction,
+                               amount: int, character: str = ""):
+            if not _admin_only(interaction):
+                await interaction.response.send_message("🚫 僅管理員。")
+                return
+            v4svc = svc._v4_service(str(interaction.channel_id))
+            g = v4svc.game
+            if character and character not in g.party:
+                await interaction.response.send_message(
+                    f"❓ 沒有角色「{character}」")
+                return
+            from engine.loot import add_xp
+            lines = []
+            add_xp(g, amount, lines, character)
+            v4svc._save()
+            body = "\n".join(lines) or f"✅ XP {amount:+d} 已入帳（無升級）"
+            await interaction.response.send_message(
+                f"⭐ {character or '全隊'} XP {amount:+d}\n" + body)
+
         @self.tree.command(name="roll-admin",
                            description="(Admin) 代擲 / roll for any character")
         @app_commands.describe(expr="骰式", character="角色")
