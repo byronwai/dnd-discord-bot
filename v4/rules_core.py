@@ -761,7 +761,17 @@ def _post_rotation(g: Game) -> None:
 def resolve(g: Game, it: Intent) -> ResolveResult:
     """The one entry point. If it's an enemy's turn, auto-resolve ALL
     consecutive NPC slots immediately (never make the player wait), then
-    dispatch the player's action with the enemy results prepended."""
+    dispatch the player's action with the enemy results prepended.
+    A pending check remembers the player's originating words so the
+    /roll settle narration can answer THEM, not just the die."""
+    r = _resolve_dispatch(g, it)
+    p = getattr(g, "_pending_check", None)
+    if p is not None and not p.get("origin"):
+        p["origin"] = (it.utterance or it.raw or "")[:120]
+    return r
+
+
+def _resolve_dispatch(g: Game, it: Intent) -> ResolveResult:
     if not g.combat.active or it.action == "pass":
         return _resolve_inner(g, it)
     cur = g.combat.current()

@@ -330,9 +330,14 @@ class V4Service:
         lines.append(render_turn_context(g, actor))
         if on_resolved:
             await on_resolved(lines)
-        # auto-continue: the story reacts to the settled verdict now
-        player_input = (f"{actor} 擲骰 d20={die}（{sk_zh}檢定"
-                        + ("成功" if ok else "失敗") + "）")
+        # auto-continue: the story reacts to the settled verdict now.
+        # The narrator answers the player's ORIGINAL /explore words (what
+        # created the check), with the die outcome appended — not a bare
+        # synthetic roll report (that produces flat re-quotes)
+        origin = pend.get("origin", "")
+        verdict = f"{actor} 擲骰 d20={die}：{'成功' if ok else '失敗'}"
+        player_input = f"{origin}（{verdict}）" if origin else \
+            f"{actor} 擲骰 d20={die}（{sk_zh}檢定{'成功' if ok else '失敗'}）"
         narration = await self._narrate(idx0, player_input, on_delta)
         self._save()
         return lines, narration
