@@ -126,12 +126,18 @@ class DiscordBot(discord.Client):
         if cid not in self._v4_games:
             from v4.service import V4Service
             data_dir = os.environ.get("DATA_DIR", "data")
+            # V4_NARR_THINK: "off"/"on" forces the Ollama think toggle
+            # (required for qwen3.x reasoning models); unset = default
+            think_raw = os.environ.get("V4_NARR_THINK", "").strip().lower()
+            narr_think = (False if think_raw in ("off", "false", "0")
+                          else True if think_raw in ("on", "true", "1")
+                          else None)
             self._v4_games[cid] = V4Service(
                 data_dir,
                 os.environ.get("LLM_URL", "http://127.0.0.1:11434"),
                 os.environ.get("V4_DIGEST_MODEL", "gemma3:12b-it-qat"),
                 os.environ.get("V4_NARR_MODEL", "gemma3:27b-it-qat"),
-                channel_id=cid)
+                channel_id=cid, narr_think=narr_think)
         return self._v4_games[cid]
 
     def _in_v4(self, interaction_or_channel) -> bool:

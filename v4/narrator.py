@@ -9,45 +9,64 @@ import httpx
 
 
 class Narrator:
-    def __init__(self, llm_url: str, model: str = "gemma3:27b-it-qat"):
+    def __init__(self, llm_url: str, model: str = "gemma3:27b-it-qat",
+                 think: bool | None = None):
         self.url = llm_url.rstrip("/")
         self.model = model
+        # None = omit (model default); False/True forces Ollama's native
+        # think toggle — REQUIRED for qwen3.x-style reasoning models,
+        # whose thinking would otherwise consume the whole token budget
+        self.think = think
 
-    async def _stream(self, prompt: str, on_delta=None,
-                      max_tokens: int = 400) -> str:
-        """Streaming chat completion — on_delta receives the growing text
-        as tokens arrive (v3 word-by-word UX)."""
-        import json as _json
+    def _body(self, prompt: str, max_tokens: int, stream: bool) -> dict:
         body = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.7, "max_tokens": max_tokens,
-            "stream": True}
+            "stream": stream,
+            "options": {"temperature": 0.7, "num_predict": max_tokens}}
+        if self.think is not None:
+            body["think"] = self.think
+        return body
+
+    async def _call(self, prompt: str, max_tokens: int) -> str:
+        """Non-streaming native /api/chat call."""
+        async with httpx.AsyncClient(timeout=180) as c:
+            r = await c.post(f"{self.url}/api/chat",
+                             json=self._body(prompt, max_tokens, False))
+            r.raise_for_status()
+            return (r.json().get("message", {}).get("content")
+                    or "").strip()
+
+    async def _stream(self, prompt: str, on_delta=None,
+                      max_tokens: int = 400) -> str:
+        """Streaming native /api/chat (ndjson) — on_delta receives the
+        growing text as tokens arrive (v3 word-by-word UX)."""
+        import json as _json
         text = ""
         async with httpx.AsyncClient(timeout=180) as c:
             async with c.stream(
-                    "POST", f"{self.url}/v1/chat/completions",
-                    json=body) as resp:
+                    "POST", f"{self.url}/api/chat",
+                    json=self._body(prompt, max_tokens, True)) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
-                    if not line.startswith("data: "):
+                    line = line.strip()
+                    if not line:
                         continue
-                    payload = line[6:].strip()
-                    if payload == "[DONE]":
-                        break
                     try:
-                        delta = _json.loads(payload)[
-                            "choices"][0]["delta"].get("content", "")
-                        if delta:
-                            text += delta
-                            if on_delta:
-                                try:
-                                    on_delta(text)
-                                except Exception:
-                                    pass
-                    except (KeyError, IndexError,
-                            _json.JSONDecodeError):
+                        chunk = _json.loads(line)
+                    except _json.JSONDecodeError:
                         continue
+                    delta = (chunk.get("message", {})
+                             .get("content", ""))
+                    if delta:
+                        text += delta
+                        if on_delta:
+                            try:
+                                on_delta(text)
+                            except Exception:
+                                pass
+                    if chunk.get("done"):
+                        break
         return text
 
     async def continue_text(self, partial: str, on_delta=None) -> str:
@@ -152,6 +171,7 @@ class Narrator:
             f"{player_block}"
             "\n=== 最後指示（最高優先）===\n"
             "· 繁體中文，絕不使用簡體字\n"
+            "· 一律第三人稱敘述（用角色名），絕不用「你」稱呼角色\n"
             "· 絕不寫出任何骰子數值、算式或判定結果\n"
             "· 絕不給予物品、傷害或經驗（那是引擎的工作）\n"
             + ("· 開頭列出的世界事實絕不得矛盾或推翻\n" if world else ""))
@@ -183,15 +203,7 @@ class Narrator:
             if on_delta:
                 # streaming: on_delta receives the growing text (v3 UX)
                 return (await self._stream(prompt, on_delta)).strip()
-            else:
-                # non-streaming (CLI, tests)
-                async with httpx.AsyncClient(timeout=180) as c:
-                    r = await c.post(f"{self.url}/v1/chat/completions", json={
-                        "model": self.model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.7, "max_tokens": 400})
-                    r.raise_for_status()
-                    text = (r.json()["choices"][0]["message"]["content"] or "").strip()
-            return text
+            # non-streaming (CLI, tests)
+            return await self._call(prompt, 400)
         except Exception:
             return ""  # degraded mode: engine lines stand alone
