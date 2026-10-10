@@ -78,16 +78,20 @@ class Narrator:
                       on_delta=None,
                       player_input: str = "",
                       scene_items: list = None,
-                      party_inventory: dict = None) -> str:
+                      party_inventory: dict = None,
+                      world: str = "") -> str:
         """hints = engine prose skeletons; npc_knows = facts an NPC may
         reveal; extra_directive = turn-level hard rule; on_delta = streaming
         callback; player_input = the player's own words — the first sentence
         must respond to it; scene_items = items physically present in the
         scene (the narrator may ONLY mention these); party_inventory =
-        {char: [item names]} the party currently carries.
+        {char: [item names]} the party currently carries; world = tone +
+        canon block distilled from gamerules.json (must never be
+        contradicted).
         v3 lesson: most critical rules go at the END (canonical tail)."""
         if not facts:
             return ""
+        world_head = f"{world}\n" if world else ""
         hint_block = ""
         if hints:
             hint_block = ("\n骨架句（依序作為段落骨架，可潤飾與連接，"
@@ -149,10 +153,12 @@ class Narrator:
             "\n=== 最後指示（最高優先）===\n"
             "· 繁體中文，絕不使用簡體字\n"
             "· 絕不寫出任何骰子數值、算式或判定結果\n"
-            "· 絕不給予物品、傷害或經驗（那是引擎的工作）\n")
+            "· 絕不給予物品、傷害或經驗（那是引擎的工作）\n"
+            + ("· 開頭列出的世界事實絕不得矛盾或推翻\n" if world else ""))
         if extra_directive:
             tail += f"· {extra_directive}\n"
         prompt = (
+            f"{world_head}"
             f"場景：{scene}\n隊伍現況：{party_brief}{hint_block}\n"
             "（引擎事實，僅供核對：\n"
             + "\n".join(f"- {f}" for f in facts) + "）\n"

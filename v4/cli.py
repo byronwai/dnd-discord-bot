@@ -123,7 +123,8 @@ def repl() -> None:
 
 def selftest() -> None:
 
-    g = build_demo_game()
+    # seeded: byte-identical replays, no random TPK flakes
+    g = build_demo_game(seed=int(os.environ.get("V4_SELFTEST_SEED", "7")))
     L = []
 
     def run(text):

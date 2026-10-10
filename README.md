@@ -92,6 +92,10 @@ find hidden items · social skills → move NPC disposition up the ladder.
 ## File Structure
 
 ```
+gamerules.json          # single source of truth: world tone + canon +
+                        # narrative constraints (injected into the
+                        # narrator prompt; edit here to change the world)
+
 v4/                     # game engine (the core)
 ├── intent.py           # Intent dataclass + deterministic parser
 ├── world.py            # Scene graph, NPCs (with knows), encounters

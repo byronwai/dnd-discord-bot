@@ -20,6 +20,34 @@ _HELP_RE = re.compile(
     r"意見|建議|去哪|去邊|邊度|hint|help|what now|what should|now what|"
     r"should we|advice", re.I)
 
+
+def load_gamerules() -> dict:
+    """gamerules.json at the repo root — the single source of truth for
+    world tone/canon and narrative constraints. Missing file = {}."""
+    path = os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "gamerules.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def world_block(rules: dict) -> str:
+    """Compact prompt block distilled from gamerules.json: the tone the
+    narration must carry and the canon facts it must never contradict."""
+    if not rules:
+        return ""
+    bits = []
+    if rules.get("tone"):
+        bits.append(f"世界基調：{rules['tone']}")
+    canon = (rules.get("world") or {}).get("canon") or []
+    if canon:
+        bits.append("世界事實（必須遵守，絕不得矛盾）：\n"
+                    + "\n".join(f"- {c}" for c in canon))
+    return "\n".join(bits)
+
 from .cli import META, build_demo_game
 from .digestor import Digestor
 from .intent import Intent
@@ -49,6 +77,9 @@ class V4Service:
         # mid-sentence): /continue resumes it before anything else.
         # (init BEFORE _load — the saved blob may restore it)
         self._unfinished = None
+        # game rules (gamerules.json) — world tone + canon the narrator
+        # must stick to; single source of truth, DM-editable
+        self.rules = load_gamerules()
         self.game: Game = self._load() or build_demo_game()
         self.pending = None  # Intent awaiting the player's /confirm
         self._recent_narrations: list[str] = []  # v3: repetition guard
@@ -378,7 +409,8 @@ class V4Service:
             npc_knows=safe_knows, npc_name=npc_name,
             extra_directive=extra, on_delta=on_delta,
             player_input=map_out(player_input, pmap),
-            scene_items=scene_items, party_inventory=party_inv)
+            scene_items=scene_items, party_inventory=party_inv,
+            world=world_block(self.rules))
         # review trail: log the pair so output quality is auditable
         log.info("narrate | in=%.60s | hints=%d | out=%.200s",
                  player_input.replace("\n", " "), len(hints),

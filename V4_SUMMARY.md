@@ -97,6 +97,12 @@ no-LLM fallback path.
 | `guards.py` | v3 defenses: placeholders, scrubbing, repetition, s2t |
 | `service.py` | Orchestration, per-channel games, persistence |
 
+**`gamerules.json`** (repo root) — the single source of truth the LLMs
+stick to: world tone, canon facts（絕不得矛盾）, narration musts/forbiddens,
+social/combat house rules. The service distills it into a world block
+(tone + canon) injected at the head of every narrator prompt, with a
+canonical-tail rule enforcing it; missing file degrades gracefully.
+
 ## 6. Actions (19)
 
 | Action | Trigger | Engine behaviour |
