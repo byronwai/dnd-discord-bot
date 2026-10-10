@@ -529,7 +529,8 @@ class DiscordBot(discord.Client):
                 lines.append(f"  {ab}：{row}")
             lines.append("　　（用 `/explore` 描述動作，或 `/combat` → 技能）")
             # moves
-            from engine.moves import compute_attack_moves
+            from engine.moves import (compute_attack_moves,
+                                      move_spell_level)
             inv_tuples = [("item", n, q) for n, q in inv]
             mx = g.max_slot(char)
             moves = compute_attack_moves(
