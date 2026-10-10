@@ -306,15 +306,21 @@ class DiscordBot(discord.Client):
             if not char:
                 return [app_commands.Choice(name="（先用 /explore 建立角色）",
                                             value="")]
-            from engine.moves import compute_attack_moves
+            from engine.moves import compute_attack_moves, move_spell_level
             inv = [("item", n, q) for n, q in g.inventory.get(char, [])]
             mx = g.max_slot(char)
             moves = compute_attack_moves(
                 g.party[char].get("occupation", ""),
                 int(g.party[char].get("level", 1)), inv, mx)
+            cur_slots = g.party[char].get("slots") or {}
             q = (current or "").strip().lower()
             out = []
             for m in moves:
+                # don't offer leveled moves whose slots are spent — the
+                # engine would just deny them (法術格已用盡)
+                req = move_spell_level.get(m["name"], 0)
+                if req and int(cur_slots.get(str(req), 0)) <= 0:
+                    continue
                 label = (f"{m['name']}（{m['ability']} 傷害 {m['dmg']}"
                          + ("，範圍" if m["aoe"] else "") + "）")
                 if not q or q in label.lower() or q in m["name"].lower():

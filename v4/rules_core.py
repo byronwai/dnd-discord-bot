@@ -664,7 +664,10 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
                     foe, tgt_char = resolve_target(g, it.target)
                     break
         r = _attack(g, actor, it.target, it.args.get("move", ""))
-        post = _post_rotation(g)
+        # only an EXECUTED attack burns the turn: a denied one (no
+        # spell slot for the chosen move) must NOT advance rotation —
+        # the player hasn't acted yet, they were told to pick another
+        post = _post_rotation(g) if r.accepted else []
         return ResolveResult(r.lines + post, accepted=r.accepted,
                              confirm=r.confirm)
 
