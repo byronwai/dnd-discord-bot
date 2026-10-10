@@ -146,7 +146,9 @@ graph LR
 | Engine has the only write path | LLM cannot cheat — no attack surface |
 | Ledger is append-only | Full audit trail, replayable |
 | Narrator gets skeletons | Fewer tokens to generate, smaller hallucination surface |
-| NPC `knows` lists | Narrator cannot invent quest content |
+| NPC `knows` + `disclosed` lists | Narrator cannot invent quest content; the engine drips one NEW fact per successful exchange and players see their intel progress (`/status`, 已問出 x/y) |
+| Help detection = digestor field (`wants_help`) | Intent reading by meaning is the LLM's job; keyword regex only backstops the no-LLM fallback |
+| Narrator voices the engine's pick | A `reveal` fact must be spoken verbatim in dialogue — information flow stays engine-owned |
 | Plain text = table talk | No accidental DM triggers from chatter |
 | Structured /combat skips digestor | Zero ambiguity = zero confirmation |
 | Selftest with seed | Byte-identical replays for regression |

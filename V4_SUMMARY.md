@@ -57,14 +57,17 @@ Player text ──→ [Digestor 12b] ──→ Intent JSON
 **Digestor** handles: Cantonese (劈/揼/篤/執/攞), English code-mixing
 ("i picked a sword"), paraphrase to written Chinese first, action
 meanings (not just words). See `v4/digestor.py` prompt for the full
-action definition table.
+action definition table. It also judges **`wants_help`** by meaning
+（「點算好」「stuck 咗」「any ideas?」）— intent reading is the LLM's
+job, not a keyword regex; the regex in `service.py` only backstops the
+no-LLM fallback path.
 
 ## 4. Dice Mechanics
 
 | Path | Flow | Agency |
 |---|---|---|
 | `/combat` | Player picks action → engine rolls immediately | Consent by selection |
-| `/explore` (check) | Engine shows check card → player `/roll d20` → engine settles → **narrator auto-continues** | Player rolls |
+| `/explore` (check) | Engine shows check card → player `/roll d20` → engine settles → **narrator auto-continues** (answering the player's ORIGINAL words + the verdict — the pending check carries `origin`) | Player rolls |
 | `/roll-admin` (d20) | Settles a pending check the same way, with auto-continue | Admin rolls |
 | `/explore` (take) | Engine moves ground item to inventory (no roll needed) | — |
 | `/explore` (talk NPC) | Friendly: no check. Else: social skill check card | Player rolls |
@@ -95,7 +98,7 @@ action definition table.
 | `move` | /explore (去/go) | Scene change + encounter check |
 | `use` | /combat, /explore | Apply item (potions heal, etc.) |
 | `cast` | /combat, /explore | Consume spell slot, narrate effect |
-| `talk` | /explore | Social check (skill-aware), disposition moves, narrator voices NPC |
+| `talk` | /explore | Social check (skill-aware), disposition moves + intel drip, narrator voices NPC |
 | `skill` | /combat (技能), /explore | Named skill check with mechanical effect (below) |
 | `search` | /explore (搜索) | WIS(perception) check → reveal hidden items |
 | `creative` | /explore (自創) | Ability check for improvised method |
@@ -139,6 +142,30 @@ skill; success steps the NPC up — the LLM only voices it.
 the player's own `/roll d20` (effects apply at settle time — either path,
 exactly once). `/combat` skills auto-roll and burn the combat turn.
 
+## 6c. NPC Intel Tracking (knows + disclosed)
+
+Each NPC carries a `knows` list (facts they can reveal) AND a persisted
+`disclosed` list (facts the party has already pried out). The engine
+owns the drip — the narrator only voices what the engine released:
+
+| Event | Behaviour |
+|---|---|
+| Successful exchange (friendly talk / settled social check / insight) | Engine reveals exactly the NEXT unknown fact: ledgered (`reveal`), shown as a 📜 engine line, narrator directed to voice that exact fact in dialogue |
+| Failed social check | Nothing revealed |
+| NPC exhausted | 「沒有更多可透露的了」— honestly |
+
+Player visibility (no re-asking needed):
+- `/status` + `status` keyword → 📜 已知情報 section lists every
+  disclosed fact across all scenes
+- Turn-end suggestions show progress: `向 **船長** 打聽（已問出 2/4）`
+  → `情報已全部問出`
+
+**Help directives** (narrator): a settle/exchange carrying a `reveal`
+must speak that fact verbatim in dialogue; `wants_help` input gets a
+summarize-situation + concrete-next-steps directive built from the
+engine's own suggested actions. Pending (undecided) checks never get
+info directives — the outcome must not be spoiled before the roll.
+
 ## 7. Guards (v3 Lessons Applied)
 
 | Guard | Prevents |
@@ -179,6 +206,7 @@ layout via `settle_roll`.
 | Feature | Status |
 |---|---|
 | Director (new objects) | Design ready — typed templates + engine gate |
+| Item catalog (`engine/itemlib.py`) | Design agreed — DB-backed items with the inventory guard; not built |
 | SRD retrieval | rules.db exists, not wired to v4 |
 | Difficulty scaling | Not in v4 world model |
 | Death save counters | Not implemented |
