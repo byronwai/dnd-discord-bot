@@ -505,8 +505,9 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
                     foe, tgt_char = resolve_target(g, it.target)
                     break
         r = _attack(g, actor, it.target, it.args.get("move", ""))
-        _post_rotation(g)
-        return r
+        post = _post_rotation(g)
+        return ResolveResult(r.lines + post, accepted=r.accepted,
+                             confirm=r.confirm)
 
     if it.action == "move":
         sid = g.world.find_exit(it.destination)
@@ -527,17 +528,36 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         return ResolveResult(lines)
 
     if it.action == "use":
+        # 5e: you can administer a potion to a companion — including a
+        # DOWNED one（餵藥）. The ACTOR must be alive; the target need not.
+        target = (it.args.get("to") or it.target or "").strip()
+        tgt = ""
+        for n in g.party:
+            if target and (n == target or n in target or target in n):
+                tgt = n
+                break
         if _POTION.search(it.item):
+            heal_who = tgt or actor
             dmg, det = roll_expr("2d4+2")
-            e = g.party[actor]
+            e = g.party[heal_who]
             before = int(e["hp_now"])
             e["hp_now"] = min(int(e["hp_max"]), before + dmg)
             g.take_item(actor, it.item, 1)
-            g.ledger.add(actor, "heal", f"{actor} 喝下治療藥水，回復 "
-                         f"{e['hp_now'] - before} HP", item=it.item)
+            if heal_who == actor:
+                g.ledger.add(actor, "heal", f"{actor} 喝下治療藥水，回復 "
+                             f"{e['hp_now'] - before} HP", item=it.item)
+                return ResolveResult([
+                    f"💚 {actor} 使用 {it.item}（{det} = {dmg}）→ "
+                    f"HP {before} → **{e['hp_now']}/{e['hp_max']}**"])
+            g.ledger.add(actor, "heal",
+                         f"{actor} 餵 {heal_who} 喝下治療藥水，回復 "
+                         f"{e['hp_now'] - before} HP", item=it.item,
+                         target=heal_who)
+            woke = "，甦醒過來！" if before <= 0 else ""
             return ResolveResult([
-                f"💚 {actor} 使用 {it.item}（{det} = {dmg}）→ "
-                f"HP {before} → **{e['hp_now']}/{e['hp_max']}**"])
+                f"💚 {actor} 餵 {heal_who} 喝下 {it.item}"
+                f"（{det} = {dmg}）→ HP {before} → "
+                f"**{e['hp_now']}/{e['hp_max']}**{woke}"])
         g.take_item(actor, it.item, 1)
         g.ledger.add(actor, "item", f"{actor} 使用了 {it.item}", item=it.item)
         return ResolveResult([f"🎒 {actor} 使用了 {it.item}（無機械效果）"])
@@ -748,9 +768,10 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
                      f"{actor} 使出 {sk}"
                      + (f"（對 {target}）" if target else ""),
                      skill=sk, target=target)
+        lines = [line]
         if in_combat:
-            _post_rotation(g)
-        return ResolveResult([line])
+            lines += _post_rotation(g)
+        return ResolveResult(lines)
 
     if it.action == "check":
         # plain ability check; a trailing skill word upgrades it with
@@ -763,8 +784,8 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
 
     if it.action == "pass":
         g.ledger.add(actor, "pass", f"{actor} 選擇等待")
-        _post_rotation(g)
-        return ResolveResult([f"⏭ {actor} 等待"])
+        return ResolveResult(
+            [f"⏭ {actor} 等待"] + _post_rotation(g))
 
     if it.action == "defend":
         # dodge: until their next turn, attacks against them have
@@ -773,9 +794,9 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
             g._dodge = {}
         g._dodge[actor] = True
         g.ledger.add(actor, "defend", f"{actor} 擺出防禦姿態（閃避）")
-        _post_rotation(g)
         return ResolveResult(
-            [f"🛡 {actor} 全神貫注防守——敵人下一次攻擊他將有劣勢"])
+            [f"🛡 {actor} 全神貫注防守——敵人下一次攻擊他將有劣勢"]
+            + _post_rotation(g))
 
     if it.action == "escape":
         if not g.combat.active:
@@ -791,7 +812,7 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
             lines.append("🏃 **隊伍趁亂脫離戰鬥！**")
         else:
             lines.append(f"❌ {actor} 被攔住了——戰鬥繼續")
-            _post_rotation(g)
+            lines += _post_rotation(g)
         return ResolveResult(lines)
 
     if it.action == "observe":
@@ -808,9 +829,9 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         g._aid[foe.name] = True
         g.ledger.add(actor, "observe",
                      f"{actor} 盯著 {foe.name} 找破綻", target=foe.name)
-        _post_rotation(g)
         return ResolveResult(
-            [f"👁 {actor} 觀察 **{foe.name}**——下一個攻擊它的隊友將有優勢"])
+            [f"👁 {actor} 觀察 **{foe.name}**——下一個攻擊它的隊友將有優勢"]
+            + _post_rotation(g))
 
     # unknown / meta / aspiration: don't reject — show context + options
     # and let the narrator respond in-character to what the player said
@@ -823,29 +844,34 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         accepted=True)
 
 
-def _post_rotation(g: Game) -> None:
+def _post_rotation(g: Game) -> list[str]:
     """After a PC action in combat: advance, auto-resolve NPC slots, and
-    never park the rotation on a downed PC."""
+    never park the rotation on a downed PC. RETURNS the enemy lines —
+    callers must show them (the counterattack that downs a hero must
+    never be silent)."""
+    out: list[str] = []
     if not g.combat.active:
-        return
+        return out
     g.advance()
     guard = 0
     while g.combat.active and guard < 200:
         guard += 1
         cur = g.combat.current()
         if cur is None:
-            return
+            return out
         if cur.get("npc"):
             foe = g.enemies.get(cur["name"])
             if foe is None or foe.dead:
                 g.advance()
                 continue
             for line in _enemy_turn(g, foe):
+                out.append(line)
                 g.ledger.add(foe.name, "auto", line)
             if not any(g.alive(n) for n in g.party):
+                out.append("🏴 **全隊倒地——戰鬥結束（敗北）**")
                 g.ledger.add("engine", "combat", "全隊倒地——戰鬥結束（敗北）")
                 g.end_combat()
-                return
+                return out
             g.advance()
             continue
         if not g.alive(cur["name"]):
@@ -854,7 +880,8 @@ def _post_rotation(g: Game) -> None:
         # their turn arrives: the dodge stance ends (lasted one round)
         if isinstance(getattr(g, "_dodge", None), dict):
             g._dodge.pop(cur["name"], None)
-        return
+        return out
+    return out
 
 
 def resolve(g: Game, it: Intent) -> ResolveResult:

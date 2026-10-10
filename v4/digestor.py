@@ -37,11 +37,13 @@ class Digestor:
             "deception，想嚇佢填 skill=intimidation，想遊說填 skill="
             "persuasion。\n"
             "search ＝搜索、調查周圍環境。\n"
-            "use    ＝使用身上嘅物品。\n"
+            "use    ＝使用身上嘅物品（餵隊友食藥／藥水都算："
+            "target 填隊友名——隊友暈咗都可以餵）。\n"
             "cast   ＝施展法術或技能。\n"
             "skill  ＝主動使用一項 D&D 技能（冇施法成分嗰啲）。認住意思：\n"
             "         匿埋／收埋／靜靜雞＝stealth；睇穿佢講大話／睇下佢想"
-            "點＝insight；幫佢包紮／急救＝medicine；爬牆／爆門／游水＝"
+            "點＝insight；幫佢包紮／急救／救返佢／救醒佢／救助暈低嘅隊友＝"
+            "medicine；爬牆／爆門／游水＝"
             "athletics；平衡／翻滾／跳＝acrobatics；偷嘢／解鎖＝sleight of "
             "hand；跟蹤跡／搵食搵水＝survival；研究符文／魔法物件＝arcana；"
             "回想背景＝history；認動植物＝nature；認神祇儀式＝religion；"
@@ -100,6 +102,10 @@ class Digestor:
             '"action":"skill","skill":"insight","target":"船長"}\n'
             '「快啲幫依思包紮」→ {"paraphrase":"替依思急救包紮",'
             '"action":"skill","skill":"medicine","target":"依思"}\n'
+            '「快啲救返依思！」→ {"paraphrase":"趕快救醒依思",'
+            '"action":"skill","skill":"medicine","target":"依思"}\n'
+            '「餵依思喝治療藥水」→ {"paraphrase":"餵依思喝治療藥水",'
+            '"action":"use","item":"治療藥水","target":"依思"}\n'
             '「我爬上去嗰道牆」→ {"paraphrase":"爬上那道牆","action":"skill",'
             '"skill":"athletics"}\n'
             '「我哋而家點算好？」→ {"paraphrase":"我們現在怎麼辦",'

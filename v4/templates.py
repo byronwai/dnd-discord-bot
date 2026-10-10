@@ -166,6 +166,11 @@ def suggested_actions(g, actor: str = "") -> list[str]:
     """3-5 concrete next-step options, scene-aware, story-driving."""
     s = g.world.here
     opts = []
+    # downed companions are the top priority — show the way to save them
+    for n, e in g.party.items():
+        if isinstance(e, dict) and int(e.get("hp_now", 1) or 0) <= 0:
+            opts.append(f"🩹 **救 {n}**：`/explore 用醫藥救{n}`"
+                        "（DC 10）或 `/explore 餵{n}治療藥水`")
     # NPCs first (they're the story drivers)
     for n in s.npcs:
         knows = n.get("knows", [])

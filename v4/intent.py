@@ -104,6 +104,14 @@ def parse_command(text: str, party_names=()) -> Intent | None:
         it.utterance = rest
     elif action in ("use", "give", "take"):
         it.item = rest
+        if action == "use":
+            # 「使用 治療藥水 依思」— a trailing party member = target
+            # (administer a potion, works on downed allies)
+            for name in party_names:
+                if rest.endswith(name) and len(rest) > len(name):
+                    it.item = rest[:-len(name)].strip(" ：:,，,給餵喂")
+                    it.args["to"] = name
+                    break
     elif action == "cast":
         it.spell = rest
     elif action in ("attack",):
