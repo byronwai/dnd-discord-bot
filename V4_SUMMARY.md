@@ -64,7 +64,8 @@ action definition table.
 | Path | Flow | Agency |
 |---|---|---|
 | `/combat` | Player picks action → engine rolls immediately | Consent by selection |
-| `/explore` (check) | Engine shows check card → player `/roll d20` → engine settles | Player rolls |
+| `/explore` (check) | Engine shows check card → player `/roll d20` → engine settles → **narrator auto-continues** | Player rolls |
+| `/roll-admin` (d20) | Settles a pending check the same way, with auto-continue | Admin rolls |
 | `/explore` (take) | Engine moves ground item to inventory (no roll needed) | — |
 | `/explore` (talk NPC) | Friendly: no check. Else: social skill check card | Player rolls |
 | `/explore` (skill) | Skill check card → player `/roll d20` → effect applies | Player rolls |

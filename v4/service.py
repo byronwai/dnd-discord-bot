@@ -187,91 +187,12 @@ class V4Service:
             self.pending = r.confirm
         narration = ""
         if r.accepted and r.lines and self.pending is None:
-            from .templates import render_hint
-            from .guards import (make_placeholder_map, make_restore_map,
-                                 map_out, map_in, scrub_narration,
-                                 is_repetition, is_chinese)
-            hints = [h for h in (render_hint(e, g)
-                                 for e in g.ledger.entries[idx0:]) if h]
-            facts = [e.text for e in g.ledger.entries[idx0:]
-                     if e.kind != "table"]
-            brief = "；".join(f"{n} {e['hp_now']}/{e['hp_max']}HP"
-                             for n, e in g.party.items())
             # v3 lesson: the narrator must answer the player's own words,
             # especially when the engine denied something
             player_input = it.raw or it.utterance or ""
             if not player_input:
                 player_input = text[:120]
-            # pass NPC knowledge constraints if this was a talk turn
-            npc_knows, npc_name = None, ""
-            for e in g.ledger.entries[idx0:]:
-                if e.kind in ("talk", "insight") and e.data.get("npc"):
-                    npc_name = e.data["npc"]
-                    if e.kind == "insight" and e.data.get("knows"):
-                        # the engine already picked what insight reveals
-                        npc_knows = e.data["knows"]
-                        break
-                    for n in g.world.here.npcs:
-                        if n["name"] == npc_name:
-                            npc_knows = n.get("knows", [])
-                            break
-            # v3 guard: placeholder names — narrator never sees real names
-            pmap = make_placeholder_map(list(g.party))
-            rmap = make_restore_map(list(g.party))
-            safe_hints = [map_out(h, pmap) for h in hints]
-            safe_facts = [map_out(f, pmap) for f in facts]
-            safe_brief = map_out(brief, pmap)
-            safe_knows = ([map_out(k, pmap) for k in npc_knows]
-                          if npc_knows else npc_knows)
-            # v3 guard: repetition — if the last narrations were near-
-            # identical, inject a hard break directive
-            rep_hint = None
-            if is_repetition(" ".join(safe_hints), self._recent_narrations):
-                rep_hint = ("⚠️ 你最近的敘述幾乎相同——這次必須完全不同。"
-                            "換一個場景細節、感官或節奏。")
-            # item inventory: what the narrator may mention
-            s = g.world.here
-            scene_items = ([n for n, _ in s.ground_items]
-                           + [n for n, _ in s.hidden_items])
-            party_inv = {ch: [n for n, _ in stacks]
-                         for ch, stacks in g.inventory.items()}
-            narration = await self.narrator.narrate(
-                safe_facts, g.world.here.name, safe_brief, hints=safe_hints,
-                npc_knows=safe_knows, npc_name=npc_name,
-                extra_directive=rep_hint, on_delta=on_delta,
-                player_input=map_out(player_input, pmap),
-                scene_items=scene_items, party_inventory=party_inv)
-            # force Traditional Chinese (models skew Simplified)
-            try:
-                from opencc import OpenCC
-                narration = OpenCC("s2t").convert(narration)
-            except ImportError:
-                pass
-            # v3 guard: scrub fake dice/verdicts from narration
-            narration, was_scrubbed_n = scrub_narration(narration)
-            # item guard: bolded items must exist in the inventory
-            from .guards import validate_narration_items
-            all_known = scene_items + [i for items in party_inv.values()
-                                       for i in items]
-            narration, found_items = validate_narration_items(
-                narration, all_known)
-            for fi in found_items:
-                if fi not in scene_items:
-                    scene_items.append(fi)
-            if was_scrubbed_n:
-                g.ledger.add("engine", "guard",
-                             "已從敘事中清除假骰/判定文字")
-            # v3 guard: language check — if still not Chinese, degrade
-            if narration and not is_chinese(narration):
-                narration = ""  # reject non-Chinese output
-            # v3 guard: restore real names before showing to players
-            narration = map_in(narration, rmap)
-            if not narration and hints:
-                narration = map_in("\n".join(hints), rmap)  # degraded
-            # track for repetition guard
-            if narration:
-                self._recent_narrations.append(narration)
-                self._recent_narrations = self._recent_narrations[-5:]
+            narration = await self._narrate(idx0, player_input, on_delta)
         self._save()
         # v3 lesson: every turn ends with a hook — scene, status, options
         if r.accepted and r.lines:
@@ -280,3 +201,125 @@ class V4Service:
             r.lines.append("")
             r.lines.append(context)
         return r.lines, narration
+
+    # ---------- narration (shared by turns and roll settles) ----------
+
+    async def _narrate(self, idx0: int, player_input: str = "",
+                       on_delta=None) -> str:
+        """Turn the ledger entries since idx0 into guarded prose."""
+        g = self.game
+        from .templates import render_hint
+        from .guards import (make_placeholder_map, make_restore_map,
+                             map_out, map_in, scrub_narration,
+                             is_repetition, is_chinese)
+        hints = [h for h in (render_hint(e, g)
+                             for e in g.ledger.entries[idx0:]) if h]
+        facts = [e.text for e in g.ledger.entries[idx0:]
+                 if e.kind != "table"]
+        brief = "；".join(f"{n} {e['hp_now']}/{e['hp_max']}HP"
+                         for n, e in g.party.items())
+        # pass NPC knowledge constraints if this was a talk/insight turn
+        npc_knows, npc_name = None, ""
+        for e in g.ledger.entries[idx0:]:
+            if e.kind in ("talk", "insight") and e.data.get("npc"):
+                npc_name = e.data["npc"]
+                if e.kind == "insight" and e.data.get("knows"):
+                    # the engine already picked what insight reveals
+                    npc_knows = e.data["knows"]
+                    break
+                for n in g.world.here.npcs:
+                    if n["name"] == npc_name:
+                        npc_knows = n.get("knows", [])
+                        break
+        # v3 guard: placeholder names — narrator never sees real names
+        pmap = make_placeholder_map(list(g.party))
+        rmap = make_restore_map(list(g.party))
+        safe_hints = [map_out(h, pmap) for h in hints]
+        safe_facts = [map_out(f, pmap) for f in facts]
+        safe_brief = map_out(brief, pmap)
+        safe_knows = ([map_out(k, pmap) for k in npc_knows]
+                      if npc_knows else npc_knows)
+        # v3 guard: repetition — if the last narrations were near-
+        # identical, inject a hard break directive
+        rep_hint = None
+        if is_repetition(" ".join(safe_hints), self._recent_narrations):
+            rep_hint = ("⚠️ 你最近的敘述幾乎相同——這次必須完全不同。"
+                        "換一個場景細節、感官或節奏。")
+        # item inventory: what the narrator may mention
+        s = g.world.here
+        scene_items = ([n for n, _ in s.ground_items]
+                       + [n for n, _ in s.hidden_items])
+        party_inv = {ch: [n for n, _ in stacks]
+                     for ch, stacks in g.inventory.items()}
+        narration = await self.narrator.narrate(
+            safe_facts, g.world.here.name, safe_brief, hints=safe_hints,
+            npc_knows=safe_knows, npc_name=npc_name,
+            extra_directive=rep_hint, on_delta=on_delta,
+            player_input=map_out(player_input, pmap),
+            scene_items=scene_items, party_inventory=party_inv)
+        # force Traditional Chinese (models skew Simplified)
+        try:
+            from opencc import OpenCC
+            narration = OpenCC("s2t").convert(narration)
+        except ImportError:
+            pass
+        # v3 guard: scrub fake dice/verdicts from narration
+        narration, was_scrubbed_n = scrub_narration(narration)
+        # item guard: bolded items must exist in the inventory
+        from .guards import validate_narration_items
+        all_known = scene_items + [i for items in party_inv.values()
+                                   for i in items]
+        narration, found_items = validate_narration_items(
+            narration, all_known)
+        for fi in found_items:
+            if fi not in scene_items:
+                scene_items.append(fi)
+        if was_scrubbed_n:
+            g.ledger.add("engine", "guard",
+                         "已從敘事中清除假骰/判定文字")
+        # v3 guard: language check — if still not Chinese, degrade
+        if narration and not is_chinese(narration):
+            narration = ""  # reject non-Chinese output
+        # v3 guard: restore real names before showing to players
+        narration = map_in(narration, rmap)
+        if not narration and hints:
+            narration = map_in("\n".join(hints), rmap)  # degraded
+        # track for repetition guard
+        if narration:
+            self._recent_narrations.append(narration)
+            self._recent_narrations = self._recent_narrations[-5:]
+        return narration
+
+    async def settle_roll(self, die: int,
+                          on_delta=None) -> tuple[list[str], str]:
+        """Settle the pending check with the player's own die, then
+        AUTO-CONTINUE: the narrator immediately picks the story back up
+        from the settled outcome (v3 lesson: /roll must never leave the
+        story hanging). Returns (engine lines, narration) — empty lines
+        when no check was pending (not a 'valid' settle)."""
+        from .rules_core import resolve_pending_check
+        g = self.game
+        pend = getattr(g, "_pending_check", None)
+        if not pend:
+            return [], ""
+        idx0 = len(g.ledger.entries)
+        actor = pend.get("actor", "")
+        skill = pend.get("skill", "")
+        ability = pend.get("ability", "")
+        from engine.charlib import SKILL_LABEL
+        sk_zh = SKILL_LABEL.get(skill, "") or ability
+        ok, line = resolve_pending_check(g, die)
+        lines = [f"🎲 **{actor}** d20 → **{die}**"]
+        if line:
+            lines.append(line)
+        # auto-continue: the story reacts to the settled verdict now
+        player_input = (f"{actor} 擲骰 d20={die}（{sk_zh}檢定"
+                        + ("成功" if ok else "失敗") + "）")
+        narration = await self._narrate(idx0, player_input, on_delta)
+        # v3 lesson: every turn ends with a hook
+        if lines:
+            from .templates import render_turn_context
+            lines.append("")
+            lines.append(render_turn_context(g, actor))
+        self._save()
+        return lines, narration

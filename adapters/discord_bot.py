@@ -546,23 +546,12 @@ class DiscordBot(discord.Client):
         @app_commands.describe(expr="骰式：d20、2d6+3、adv")
         async def roll_cmd(interaction: discord.Interaction,
                            expr: str = "d20"):
-            from engine.dice import quick_roll, roll_expr
-            g = svc._v4_service(str(interaction.channel_id)).game
+            from engine.dice import quick_roll
             expr = (expr or "d20").strip() or "d20"
 
-            # if a check is pending and the player rolls a d20, settle it
-            pend = getattr(g, "_pending_check", None)
-            if pend and expr.lower() in ("d20", "1d20"):
-                die, _ = roll_expr("d20")
-                from v4.rules_core import resolve_pending_check
-                ok, line = resolve_pending_check(g, die)
-                if line:
-                    svc._v4_service(
-                        str(interaction.channel_id))._save()
-                    await interaction.response.send_message(
-                        f"🎲 **{interaction.user.display_name}** "
-                        f"d20 → **{die}**\n{line}")
-                    return
+            # a d20 that settles a pending check auto-continues the story
+            if await _v4_settle(interaction, expr):
+                return
 
             try:
                 result = quick_roll(expr)
@@ -738,8 +727,13 @@ class DiscordBot(discord.Client):
             if not interaction.user.guild_permissions.manage_guild:
                 await interaction.response.send_message("🚫 僅管理員。")
                 return
+            expr = (expr or "d20").strip() or "d20"
+            # an admin d20 settles a pending check and auto-continues too
+            if await _v4_settle(interaction, expr,
+                                echo=f"(admin) {character}".rstrip()):
+                return
             try:
-                result = quick_roll(expr.strip() or "d20")
+                result = quick_roll(expr)
             except ValueError as e:
                 await interaction.response.send_message(f"⚠️ {e}")
                 return
@@ -809,6 +803,43 @@ class DiscordBot(discord.Client):
                 await msg.edit(content=_clip(content) + " ▍")
             except discord.HTTPException:
                 pass
+
+        async def _v4_settle(interaction, expr, echo=""):
+            """A d20 /roll that settles a pending check AUTO-CONTINUES the
+            story: die echo → engine verdict → narrator streams forward.
+            Returns True when it was a valid settle (command consumed)."""
+            v4svc = svc._v4_service(str(interaction.channel_id))
+            pend = getattr(v4svc.game, "_pending_check", None)
+            if not pend or expr.lower() not in ("d20", "1d20"):
+                return False
+            await interaction.response.defer(thinking=True)
+            die, _ = roll_expr("d20")
+            tag = f" {echo}" if echo else ""
+            # echo the raw die immediately — the verdict follows
+            await interaction.channel.send(
+                f"🎲{tag} **{interaction.user.display_name}** "
+                f"d20 → **{die}**")
+            narr_msg = await interaction.channel.send("📖 DM 正在寫作…")
+            last_edit = [0.0]
+
+            def on_delta(acc: str):
+                now = asyncio.get_event_loop().time()
+                if now - last_edit[0] >= 2.0 and len(acc) > 20:
+                    last_edit[0] = now
+                    asyncio.create_task(_edit_safe(narr_msg, acc))
+
+            try:
+                lines, narration = await v4svc.settle_roll(die, on_delta)
+            except Exception as e:
+                log.exception("v4 roll settle failed")
+                await narr_msg.edit(content=f"⚠️ {e}")
+                return True
+            body = "\n".join(lines)
+            if body:
+                await narr_msg.edit(content=_clip(body))
+            if narration:
+                await interaction.channel.send("📖 " + _clip(narration))
+            return True
 
         async def _v4_admin(interaction, character, text):
             """Admin v4 turn for any character — with public echo."""
