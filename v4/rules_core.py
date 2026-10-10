@@ -768,6 +768,7 @@ def resolve(g: Game, it: Intent) -> ResolveResult:
     p = getattr(g, "_pending_check", None)
     if p is not None and not p.get("origin"):
         p["origin"] = (it.utterance or it.raw or "")[:120]
+        p["help"] = bool(getattr(it, "wants_help", False))
     return r
 
 

@@ -242,15 +242,19 @@ class V4Service:
             player_input = it.raw or it.utterance or ""
             if not player_input:
                 player_input = text[:120]
-            narration = await self._narrate(idx0, player_input, on_delta)
+            narration = await self._narrate(
+                idx0, player_input, on_delta,
+                wants_help=bool(getattr(it, "wants_help", False)))
         self._save()
         return r.lines, narration
 
     # ---------- narration (shared by turns and roll settles) ----------
 
     async def _narrate(self, idx0: int, player_input: str = "",
-                       on_delta=None) -> str:
-        """Turn the ledger entries since idx0 into guarded prose."""
+                       on_delta=None, wants_help: bool = False) -> str:
+        """Turn the ledger entries since idx0 into guarded prose.
+        wants_help comes from the digestor's intent judgement; the
+        keyword regex is only the no-LLM fallback."""
         g = self.game
         from .templates import render_hint
         from .guards import (make_placeholder_map, make_restore_map,
@@ -290,7 +294,9 @@ class V4Service:
             rep_hint = ("⚠️ 你最近的敘述幾乎相同——這次必須完全不同。"
                         "換一個場景細節、感官或節奏。")
         # help directives (live-game lesson: players asking NPCs or the
-        # DM for help got atmosphere instead of information)
+        # DM for help got atmosphere instead of information). Judged by
+        # the DIGESTOR by meaning (wants_help); the regex only backstops
+        # the deterministic no-LLM path
         help_bits = []
         if npc_knows and npc_name:
             for e in g.ledger.entries[idx0:]:
@@ -303,7 +309,7 @@ class V4Service:
                         f"{npc_name}以對話形式明確說出至少一項上述已知"
                         "事實，不能只描寫氣氛或敷衍。")
                     break
-        if _HELP_RE.search(player_input):
+        if wants_help or _HELP_RE.search(player_input):
             from .templates import suggested_actions
             opts = "；".join(suggested_actions(g, ""))[:220]
             help_bits.append(
@@ -410,7 +416,9 @@ class V4Service:
         verdict = f"{actor} 擲骰 d20={die}：{'成功' if ok else '失敗'}"
         player_input = f"{origin}（{verdict}）" if origin else \
             f"{actor} 擲骰 d20={die}（{sk_zh}檢定{'成功' if ok else '失敗'}）"
-        narration = await self._narrate(idx0, player_input, on_delta)
+        narration = await self._narrate(
+            idx0, player_input, on_delta,
+            wants_help=bool(pend.get("help")))
         self._save()
         return lines, narration
 

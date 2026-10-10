@@ -47,6 +47,7 @@ class Intent:
     skill: str = ""
     raw: str = ""
     confidence: float = 1.0  # digestor fills this; low -> engine asks back
+    wants_help: bool = False  # digestor: player is asking for guidance
     args: dict = field(default_factory=dict)
 
 

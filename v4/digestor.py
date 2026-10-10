@@ -55,18 +55,22 @@ class Digestor:
             "meta   ＝願望、目標、感受、角色想法。\n"
             "chat   ＝玩家之間嘅對話（唔係對 DM 講）。\n"
             "pass   ＝等待、跳過。\n\n"
+            "另外判斷 wants_help：玩家係咪正在尋求幫助、建議、指引、"
+            "提示（「點算好」「有咩線索」「我哋而家做咩」「any ideas?」"
+            "「stuck 咗」）——無論佢用咩語言、咩講法，按意思判斷，"
+            "唔好只靠字面。純動作（攻擊、執嘢、行路）填 false。\n\n"
             f"玩家角色: {'、'.join(party_names)}\n"
             f"目前場景: {scene_name}"
             f"（通道: {'、'.join(exits) if exits else '無'}）\n"
             + tgt_line +
             '欄位: {"paraphrase","action","actor","target","item",'
-            '"spell","destination","utterance","skill"} — '
+            '"spell","destination","utterance","skill","wants_help"} — '
             "paraphrase 係書面中文重述；skill 填英文技能名"
             "（stealth/insight/medicine/athletics/acrobatics/"
             "sleight of hand/survival/arcana/history/nature/religion/"
             "animal handling/perception/investigation/deception/"
-            "intimidation/performance/persuasion）；"
-            "用不到嘅欄位填空字串。\n\n"
+            "intimidation/performance/persuasion）；wants_help 係 true/"
+            "false；用不到嘅欄位填空字串。\n\n"
             "範例（真實粵語＋混英文）：\n"
             '「我用劍劈小明」→ {"paraphrase":"用劍砍小明","action":"attack",'
             '"actor":"","target":"小明","item":"劍"}\n'
@@ -94,7 +98,11 @@ class Digestor:
             '「快啲幫依思包紮」→ {"paraphrase":"替依思急救包紮",'
             '"action":"skill","skill":"medicine","target":"依思"}\n'
             '「我爬上去嗰道牆」→ {"paraphrase":"爬上那道牆","action":"skill",'
-            '"skill":"athletics"}\n\n'
+            '"skill":"athletics"}\n'
+            '「我哋而家點算好？」→ {"paraphrase":"我們現在怎麼辦",'
+            '"action":"meta","wants_help":true}\n'
+            '「any ideas? stuck 咗」→ {"paraphrase":"卡住了，求建議",'
+            '"action":"meta","wants_help":true}\n\n'
             "拿不準時，偏向遊戲動作（玩家的行動不能被漏掉）。\n"
             f'玩家輸入:「{text}」→')
         try:
@@ -120,7 +128,9 @@ class Digestor:
                 utterance=(data.get("utterance") or "").strip(),
                 skill=(data.get("skill") or "").strip(),
                 raw=text,
-                confidence=max(0.0, min(1.0, float(data.get("confidence") or 0.8))))
+                confidence=max(0.0, min(1.0, float(data.get("confidence") or 0.8))),
+                wants_help=str(data.get("wants_help", "")).strip().lower()
+                in ("true", "1", "yes", "係", "是"))
         except Exception:
             it = parse_command(text, party_names)
             if it is None:
