@@ -15,7 +15,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from v4.cli import build_demo_game, handle                    # noqa: E402
 from v4.intent import Intent, parse_command                   # noqa: E402
 from v4.plot import load_plot, new_state, tick as plot_tick    # noqa: E402
-from v4.rules_core import (_death_save, resolve,              # noqa: E402
+from v4.rules_core import (_one_death_save as _death_save,    # noqa: E402
+                           resolve,                           # noqa: E402
                            resolve_pending_check as rpc)
 from v4.service import V4Service, load_gamerules, world_block  # noqa: E402
 from v4.world import Enemy, Scene                             # noqa: E402

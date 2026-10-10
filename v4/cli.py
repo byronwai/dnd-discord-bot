@@ -179,22 +179,18 @@ def selftest() -> None:
     L.clear()
 
     def await_turn(name):
-        for _ in range(12):
-            if not g.combat.active:
-                return False
-            c = g.combat.current()
-            if c and not c.get("npc") and c["name"] == name:
-                return True
-            run("pass")
-            L.clear()
-        return False
+        """v5 action slots: any UNACTED PC may act — no waiting."""
+        return g.combat.active and g.alive(name) \
+            and name not in g.combat.acted
 
-    # engine-enforced rotation: acting out of turn is denied
+    # v5 per-round action slots: each PC acts once per round, any order
     first, second = list(g.party)
     if await_turn(first):
-        run(f"{second} 攻擊 哥布林①")
-        assert any("輪到" in x for x in L), L
-        L.clear()
+        run(f"{first} 攻擊 哥布林①")     # out-of-INITIATIVE order: fine
+        assert first in g.combat.acted
+        run(f"{first} 攻擊 哥布林①")     # second action same round: denied
+        assert any("已行動" in x for x in L), L
+    L.clear()
 
     # search on your turn: card for the dice or passive auto-success —
     # either way a check lands in the ledger (effects apply in-engine)
@@ -219,15 +215,17 @@ def selftest() -> None:
     assert any(x.startswith(("🚫", "⏳", "❓")) for x in L), L
     L.clear()
 
-    # enemies strike back automatically; the rotation never parks on the
-    # dead (engine-skipped); heroes use their cantrips and drink when hurt
+    # enemies strike back at ROUND END (all PCs acted); heroes use their
+    # cantrips and drink when hurt
     best_move = {"依思": "魔能爆", "大力蕉": "詛咒木杖"}
     for _ in range(40):
         if not g.combat.active:
             break
-        cur = g.combat.current()
-        if cur and not cur.get("npc"):
-            hero = cur["name"]
+        for hero in list(g.party):   # v5 slots: every alive PC acts
+            if not g.combat.active:
+                break
+            if not g.alive(hero) or hero in g.combat.acted:
+                continue
             hurt = g.party[hero]["hp_now"] <= 6
             has_potion = any(n == "治療藥水"
                              for n, q in g.inventory[hero])
@@ -238,10 +236,7 @@ def selftest() -> None:
                 foes = [f.name for f in g.enemies.values() if not f.dead]
                 tgt = sorted(foes)[0] if foes else "哥布林①"
                 run(f"{hero} 攻擊 {tgt}" + (f" {mv}" if mv else ""))
-        else:
-            run("pass")
         L.clear()
-    assert not g.combat.active or g.alive(g.combat.current()["name"])
 
     # long rest restores every LIVING character; the downed STAY down
     living = [n for n in g.party if g.alive(n)]

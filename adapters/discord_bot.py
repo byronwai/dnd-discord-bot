@@ -800,9 +800,10 @@ class DiscordBot(discord.Client):
             g = svc._v4_service(str(interaction.channel_id)).game
             lines = [f"📍 場景：{g.world.here.name}"]
             if g.combat.active:
-                cur = g.combat.current()
-                lines.append(f"⚔️ 戰鬥 R{g.combat.round}"
-                             + (f"—輪到 {cur['name']}" if cur else ""))
+                waiting = [n for n in g.party
+                           if g.alive(n) and n not in g.combat.acted]
+                lines.append(f"⚔️ 戰鬥 R{g.combat.round} — 待行動："
+                             + ("、".join(waiting) or "敵方回合結算中"))
             for n, e in g.party.items():
                 slots = e.get("slots") or {}
                 slot_txt = (" slots " + "·".join(
@@ -881,9 +882,11 @@ class DiscordBot(discord.Client):
                              f" {p.target or p.destination or p.item or ''}**"
                              "——回覆「確認」")
             if g.combat.active:
-                cur = g.combat.current()
-                if cur and not cur.get("npc"):
-                    lines.append(f"⚔️ 輪到 **{cur['name']}**——用 `/attack` `/use` `/skill`")
+                waiting = [n for n in g.party
+                           if g.alive(n) and n not in g.combat.acted]
+                if waiting:
+                    lines.append("⚔️ 待行動：**" + "、".join(waiting)
+                                 + "**——用 `/attack` `/use` `/skill`")
             if not lines:
                 lines.append(f"🔄 場景：{g.world.here.name}")
                 if not g.party:

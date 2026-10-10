@@ -16,9 +16,12 @@ from .world import World, Enemy
 
 class Combat:
     def __init__(self):
-        self.order: list[dict] = []   # {name, init, npc}
+        self.order: list[dict] = []   # {name, init, npc} — initiative, flavour
         self.idx = 0
         self.round = 1
+        # v5 async-friendly: per-round ACTION SLOTS — any PC may act in
+        # any order, once per round; enemies resolve when all acted
+        self.acted: list[str] = []
 
     @property
     def active(self) -> bool:
@@ -146,11 +149,17 @@ class Game:
 
     def start_encounter(self, seed: int = None) -> list[dict]:
         """Spawn this scene's encounter (once) and roll initiative.
-        v5: enemies scale to the party tier (CR budgeting)."""
+        v5: enemies scale to the party tier (CR budgeting); DEAD
+        encounter entries are never respawned, and a fully-cleared
+        encounter is consumed."""
         from engine.cr import scale_for_party
         scene = self.world.current
-        foes = self.encounters.get(scene)
-        if not foes or self.combat.active:
+        foes = [f for f in self.encounters.get(scene, [])
+                if not f.dead and f.hp > 0]
+        if not foes:
+            self.encounters.pop(scene, None)   # consumed / all dead
+            return self.combat.order
+        if self.combat.active:
             return self.combat.order
         rng = self._random if seed is None else random.Random(seed)
         order = []

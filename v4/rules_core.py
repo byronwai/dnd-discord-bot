@@ -594,7 +594,7 @@ def _ignite(g: Game, actor: str, it: Intent, utter: str) -> ResolveResult | None
     g.ledger.add(actor, "scene_fire", f"{actor} 點燃了 {s.name}",
                  item=tinder or source, scene=g.world.current)
     if g.combat.active:
-        lines += _post_rotation(g)
+        lines += _post_rotation(g, actor)
     return ResolveResult(lines)
 
 
@@ -649,19 +649,35 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
                      f"桌邊：{(it.utterance or it.raw)[:80]}")
         return ResolveResult([], accepted=True)
     g.ledger.next_turn()
+    # v5 async-friendly combat: PER-ROUND ACTION SLOTS. Discord is not
+    # a table — players shouldn't wait on one specific order. Any PC
+    # may act in any order, once per round; when every living PC has
+    # acted, the engine resolves the enemy round (see _post_rotation).
     cur = g.combat.current() if g.combat.active else None
     if not it.actor and cur is not None and not cur.get("npc"):
-        actor = cur["name"]  # bare action in combat = the current hero acts
+        actor = cur["name"]
     else:
         actor = it.actor or next((n for n in g.party if g.alive(n)),
                                  next(iter(g.party)))
-    # combat rotation is engine-enforced: only the current hero may act
-    if g.combat.active and it.action not in ("pass",):
-        if cur is not None and not cur.get("npc") and actor != cur["name"]:
-            reason = f"現在輪到 {cur['name']}"
-            g.ledger.add(actor, "deny", f"拒絕：{reason}", reason=reason)
+    # self-heal: combat with no living enemies ends immediately (the
+    # re-entered-corpse bug left parties fighting dead men)
+    if g.combat.active and (not g.enemies or
+                            all(f.dead or f.hp <= 0
+                                for f in g.enemies.values())):
+        g.check_end()
+        if not g.combat.active and it.action not in ("move",):
             return ResolveResult(
-                [f"⏳ {reason}——請該角色行動"], accepted=False)
+                ["🏁 **戰場已清空——戰鬥結束。**",
+                 f"📍 場景：{g.world.here.name}"])
+    if g.combat.active and it.action not in ("pass", "chat"):
+        if actor in g.combat.acted:
+            waiting = [n for n in g.party
+                       if g.alive(n) and n not in g.combat.acted]
+            reason = (f"{actor} 本回合已行動"
+                      + (f"——等待 {'、'.join(waiting)}" if waiting
+                         else "——敵方回合結算中"))
+            g.ledger.add(actor, "deny", f"拒絕：{reason}", reason=reason)
+            return ResolveResult([f"⏳ {reason}"], accepted=False)
 
     if it.action == "attack":
         # confirm only when the digestor is genuinely uncertain (freeform
@@ -699,7 +715,7 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         # only an EXECUTED attack burns the turn: a denied one (no
         # spell slot for the chosen move) must NOT advance rotation —
         # the player hasn't acted yet, they were told to pick another
-        post = _post_rotation(g) if r.accepted else []
+        post = _post_rotation(g, actor) if r.accepted else []
         return ResolveResult(r.lines + post, accepted=r.accepted,
                              confirm=r.confirm)
 
@@ -872,13 +888,13 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
             r = _throw(g, actor, it, u)
             if r is not None:
                 if g.combat.active:
-                    r.lines += _post_rotation(g)
+                    r.lines += _post_rotation(g, actor)
                 return r
         if _FIRE_RE.search(u):
             r = _ignite(g, actor, it, u)
             if r is not None:
                 if g.combat.active:
-                    r.lines += _post_rotation(g)
+                    r.lines += _post_rotation(g, actor)
                 return r
         # human-DM ruling: a plausible improvised method gets a real ability
         # check — and in combat SUCCESS HAS TACTICAL CONSEQUENCES (v5:
@@ -1028,7 +1044,7 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
                 else:
                     lines.append("❌ 有人踩到枯枝——潛行失敗")
                 if g.combat.active:
-                    lines += _post_rotation(g)
+                    lines += _post_rotation(g, actor)
                 return ResolveResult(lines)
             effect = {"kind": "stealth"}
         elif sk == "animal handling":
@@ -1065,7 +1081,7 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
                      skill=sk, target=target)
         lines = [line]
         if in_combat:
-            lines += _post_rotation(g)
+            lines += _post_rotation(g, actor)
         return ResolveResult(lines)
 
     if it.action == "check":
@@ -1093,13 +1109,13 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         lines = [f"🤝 {actor} 幫 {hit} 打下手——"
                  f"{hit} 的下一次檢定擲兩顆取高"]
         if g.combat.active:
-            lines += _post_rotation(g)
+            lines += _post_rotation(g, actor)
         return ResolveResult(lines)
 
     if it.action == "pass":
         g.ledger.add(actor, "pass", f"{actor} 選擇等待")
         return ResolveResult(
-            [f"⏭ {actor} 等待"] + _post_rotation(g))
+            [f"⏭ {actor} 等待"] + _post_rotation(g, actor))
 
     if it.action == "defend":
         # dodge: until their next turn, attacks against them have
@@ -1110,7 +1126,7 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         g.ledger.add(actor, "defend", f"{actor} 擺出防禦姿態（閃避）")
         return ResolveResult(
             [f"🛡 {actor} 全神貫注防守——敵人下一次攻擊他將有劣勢"]
-            + _post_rotation(g))
+            + _post_rotation(g, actor))
 
     if it.action == "escape":
         if not g.combat.active:
@@ -1126,7 +1142,7 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
             lines.append("🏃 **隊伍趁亂脫離戰鬥！**")
         else:
             lines.append(f"❌ {actor} 被攔住了——戰鬥繼續")
-            lines += _post_rotation(g)
+            lines += _post_rotation(g, actor)
         return ResolveResult(lines)
 
     if it.action == "observe":
@@ -1145,7 +1161,7 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
                      f"{actor} 盯著 {foe.name} 找破綻", target=foe.name)
         return ResolveResult(
             [f"👁 {actor} 觀察 **{foe.name}**——下一個攻擊它的隊友將有優勢"]
-            + _post_rotation(g))
+            + _post_rotation(g, actor))
 
     # unknown / meta / aspiration: don't reject — show context + options
     # and let the narrator respond in-character to what the player said
@@ -1158,7 +1174,7 @@ def _resolve_inner(g: Game, it: Intent) -> ResolveResult:
         accepted=True)
 
 
-def _death_save(g: Game, name: str, e: dict) -> list[str]:
+def _one_death_save(g: Game, name: str, e: dict) -> list[str]:
     """5e death saving throw, engine-rolled: <10 fail, >=10 success,
     nat 1 = two fails, nat 20 = back at 1 HP. 3 stable / 3 dead."""
     d = g.d20()
@@ -1193,29 +1209,52 @@ def _death_save(g: Game, name: str, e: dict) -> list[str]:
     return [line]
 
 
-def _post_rotation(g: Game) -> list[str]:
-    """After a PC action in combat: advance, auto-resolve NPC slots, and
-    never park the rotation on a downed PC. RETURNS the enemy lines —
-    callers must show them (the counterattack that downs a hero must
-    never be silent)."""
+def _post_rotation(g: Game, actor: str = "") -> list[str]:
+    """After a PC action in combat (v5 per-round ACTION SLOTS): mark the
+    actor's slot; once EVERY living PC has acted, resolve the whole
+    enemy round (counterattacks always visible), tick death saves /
+    conditions / fire, then start the next round. RETURNS the lines —
+    callers must show them (the hit that downs a hero is never silent)."""
     out: list[str] = []
     if not g.combat.active:
         return out
-    # v5 seed 3: once per round — downed PCs roll death saves, timed
-    # conditions expire (same round-change hook as the fire tick)
-    if getattr(g, "_round_hook", None) != g.combat.round:
-        g._round_hook = g.combat.round
-        for n, e in g.party.items():
-            d = e.get("death") or {}
-            if g.downed(n) and not d.get("stable") and not d.get("dead"):
-                out += _death_save(g, n, e)
-        out += g.tick_conds()
-    # v5 A1: a burning scene scorches every enemy once per round
-    if g.world.here.fire and \
-            getattr(g, "_fire_round", None) != g.combat.round:
-        g._fire_round = g.combat.round
+    # the actor's dodge stance ends when they next act
+    if actor and isinstance(getattr(g, "_dodge", None), dict):
+        g._dodge.pop(actor, None)
+    if actor and actor not in g.combat.acted:
+        g.combat.acted.append(actor)
+    pending = [n for n in g.party
+               if g.alive(n) and n not in g.combat.acted]
+    if pending:
+        return out  # still waiting on other players — no blocking
+    # ---- the round completes: enemies strike, then a new round ----
+    out.append(f"⚔️ **敵方回合（第 {g.combat.round} 回合結束）**")
+    for foe in list(g.enemies.values()):
+        if foe.dead or foe.hp <= 0:
+            continue
+        for line in _enemy_turn(g, foe):
+            out.append(line)
+            g.ledger.add(foe.name, "auto", line)
+    if not any(g.alive(n) for n in g.party):
+        out.append("🏴 **全隊倒地——戰鬥結束（敗北）**")
+        g.ledger.add("engine", "combat", "全隊倒地——戰鬥結束（敗北）")
+        g.end_combat()
+        return out
+    if g.check_end():
+        out.append("🏁 **戰鬥結束——敵人全滅！**")
+        g.ledger.add("engine", "combat", "戰鬥結束（敵人全滅）")
+        return out
+    g.combat.round += 1
+    g.combat.acted = []
+    g.combat.idx = 0
+    out.append(f"🕐 **第 {g.combat.round} 回合開始**——全隊可再次行動")
+    # v5 seed 3: round tick — downed PCs roll death saves, conditions
+    # expire, a burning scene scorches every enemy
+    out += _death_save(g, n=None)
+    out += g.tick_conds()
+    if g.world.here.fire:
         for foe in list(g.enemies.values()):
-            if not foe.dead:
+            if not foe.dead and foe.hp > 0:
                 foe.hp = max(0, foe.hp - 1)
                 out.append(f"🔥 火勢吞捲 {foe.name}：-1 HP → "
                            f"**{foe.hp}/{foe.hp_max}**")
@@ -1226,85 +1265,34 @@ def _post_rotation(g: Game) -> list[str]:
                     foe.dead = True
                     out.append(f"💀 {foe.name} 倒下！")
                     _on_foe_death(g, foe, out)
-                    g.ledger.add("fire", "death", f"{foe.name} 倒下",
-                                 target=foe.name)
         if g.check_end():
             out.append("🏁 **戰鬥結束——敵人全滅！**")
             g.ledger.add("engine", "combat", "戰鬥結束（敵人全滅）")
-    g.advance()
-    guard = 0
-    while g.combat.active and guard < 200:
-        guard += 1
-        cur = g.combat.current()
-        if cur is None:
-            return out
-        if cur.get("npc"):
-            foe = g.enemies.get(cur["name"])
-            if foe is None or foe.dead:
-                g.advance()
-                continue
-            for line in _enemy_turn(g, foe):
-                out.append(line)
-                g.ledger.add(foe.name, "auto", line)
-            if not any(g.alive(n) for n in g.party):
-                out.append("🏴 **全隊倒地——戰鬥結束（敗北）**")
-                g.ledger.add("engine", "combat", "全隊倒地——戰鬥結束（敗北）")
-                g.end_combat()
-                return out
-            g.advance()
-            continue
-        if not g.alive(cur["name"]):
-            g.advance()  # downed PC: their turn is skipped by the engine
-            continue
-        # their turn arrives: the dodge stance ends (lasted one round)
-        if isinstance(getattr(g, "_dodge", None), dict):
-            g._dodge.pop(cur["name"], None)
-        return out
+    return out
+
+
+def _death_save(g: Game, n=None) -> list[str]:
+    """Death saves for all downed-but-unstable PCs (or one)."""
+    out = []
+    names = [n] if n else list(g.party)
+    for name in names:
+        e = g.party[name]
+        d = e.get("death") or {}
+        if g.downed(name) and not d.get("stable") and not d.get("dead"):
+            out += _one_death_save(g, name, e)
     return out
 
 
 def resolve(g: Game, it: Intent) -> ResolveResult:
-    """The one entry point. If it's an enemy's turn, auto-resolve ALL
-    consecutive NPC slots immediately (never make the player wait), then
-    dispatch the player's action with the enemy results prepended.
+    """The one entry point. v5 per-round action slots: PCs act in any
+    order; enemies resolve when the round completes (in _post_rotation)
+    — there is no enemy 'slot' to auto-resolve on entry anymore.
     A pending check remembers the player's originating words so the
     /roll settle narration can answer THEM, not just the die."""
-    r = _resolve_dispatch(g, it)
+    r = _resolve_inner(g, it)
     p = getattr(g, "_pending_check", None)
     if p is not None and not p.get("origin"):
         p["origin"] = (it.utterance or it.raw or "")[:120]
         p["help"] = bool(getattr(it, "wants_help", False))
     return r
 
-
-def _resolve_dispatch(g: Game, it: Intent) -> ResolveResult:
-    if not g.combat.active or it.action == "pass":
-        return _resolve_inner(g, it)
-    cur = g.combat.current()
-    if cur is None or not cur.get("npc"):
-        return _resolve_inner(g, it)  # already a PC's turn
-    # enemy turn: resolve all NPC slots now
-    pre_lines = []
-    guard = 0
-    while g.combat.active and guard < 50:
-        guard += 1
-        cur = g.combat.current()
-        if cur is None or not cur.get("npc"):
-            break
-        foe = g.enemies.get(cur["name"])
-        if foe is None or foe.dead:
-            g.advance()
-            continue
-        for line in _enemy_turn(g, foe):
-            pre_lines.append(line)
-            g.ledger.add(foe.name, "auto", line)
-        if not any(g.alive(n) for n in g.party):
-            g.ledger.add("engine", "combat",
-                         "全隊倒地——戰鬥結束（敗北）")
-            g.end_combat()
-            return ResolveResult(pre_lines, accepted=True)
-        g.advance()
-    # rotation reached a PC (or combat ended) — dispatch the player action
-    r = _resolve_inner(g, it)
-    return ResolveResult(pre_lines + r.lines, accepted=r.accepted,
-                         confirm=r.confirm)

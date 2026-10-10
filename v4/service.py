@@ -122,7 +122,7 @@ class V4Service:
                            for sid, foes in g.encounters.items()},
             "enemies": {n: asdict(f) for n, f in g.enemies.items()},
             "combat": {"order": g.combat.order, "idx": g.combat.idx,
-                       "round": g.combat.round},
+                       "round": g.combat.round, "acted": g.combat.acted},
             "inventory": g.inventory,
             "turn": g.ledger.turn,
             "entries": [asdict(e) for e in g.ledger.entries],
@@ -156,6 +156,7 @@ class V4Service:
         g.combat.order = c.get("order", [])
         g.combat.idx = c.get("idx", 0)
         g.combat.round = c.get("round", 1)
+        g.combat.acted = c.get("acted", [])
         g.inventory = blob.get("inventory") or {n: [] for n in g.party}
         g.ledger.turn = blob.get("turn", 0)
         for e in blob.get("entries", []):
@@ -371,7 +372,8 @@ class V4Service:
         # （現在輪到 X）stay engine-only: turn order is meta, prose
         # there is noise.
         rotation_only = any(
-            e.kind == "deny" and "輪到" in str(e.data.get("reason", ""))
+            e.kind == "deny" and ("輪到" in str(e.data.get("reason", ""))
+                             or "已行動" in str(e.data.get("reason", "")))
             for e in g.ledger.entries[idx0:])
         if r.lines and self.pending is None and not rotation_only:
             # v3 lesson: the narrator must answer the player's own words,

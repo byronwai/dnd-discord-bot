@@ -213,9 +213,10 @@ def suggested_actions(g, actor: str = "") -> list[str]:
         opts.append("🔍 搜索這裡")
     # combat or rest
     if g.combat.active:
-        cur = g.combat.current()
-        if cur:
-            opts.append(f"⚔️ `/attack` `/use` `/skill`（輪到 {cur['name']}）")
+        waiting = [n for n in g.party
+                   if g.alive(n) and n not in g.combat.acted]
+        opts.append("⚔️ `/attack` `/use` `/skill`（待行動："
+                    + ('、'.join(waiting) or "敵方結算中") + "）")
     else:
         hurt = any(e.get("hp_now", 99) < e.get("hp_max", 1) // 2
                    for e in g.party.values() if isinstance(e, dict))
@@ -238,11 +239,10 @@ def render_turn_context(g, actor: str = "") -> str:
     if hp_line:
         lines.append(f"❤️ {hp_line}")
     if g.combat.active:
-        cur = g.combat.current()
-        if cur:
-            tag = "（敵）" if cur.get("npc") else ""
-            lines.append(f"⚔️ 戰鬥 R{g.combat.round} — 輪到 "
-                         f"**{cur['name']}**{tag}")
+        waiting = [n for n in g.party
+                   if g.alive(n) and n not in g.combat.acted]
+        lines.append(f"⚔️ 戰鬥 R{g.combat.round} — "
+                     f"待行動：{'、'.join(waiting) or '（敵方回合結算中）'}")
         for n, f in g.enemies.items():
             if not f.dead:
                 lines.append(f"   👹 {n} {f.hp}/{f.hp_max}HP AC{f.ac}")
