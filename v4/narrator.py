@@ -18,11 +18,15 @@ class Narrator:
                       npc_name: str = "",
                       extra_directive: str = None,
                       on_delta=None,
-                      player_input: str = "") -> str:
+                      player_input: str = "",
+                      scene_items: list = None,
+                      party_inventory: dict = None) -> str:
         """hints = engine prose skeletons; npc_knows = facts an NPC may
         reveal; extra_directive = turn-level hard rule; on_delta = streaming
-        callback; player_input = the player's own words this turn — the
-        first sentence of narration must respond to it.
+        callback; player_input = the player's own words — the first sentence
+        must respond to it; scene_items = items physically present in the
+        scene (the narrator may ONLY mention these); party_inventory =
+        {char: [item names]} the party currently carries.
         v3 lesson: most critical rules go at the END (canonical tail)."""
         if not facts:
             return ""
@@ -41,6 +45,26 @@ class Narrator:
                 "絕不得透露不在清單上的資訊（不得給予地點、物品、"
                 "攻略建議、劇情推測）；可以閒聊、可以拒絕回答、"
                 "可以要求交換條件。\n")
+        # item inventory: the narrator may ONLY mention items that exist
+        items_block = ""
+        if scene_items or party_inventory:
+            lines = []
+            if scene_items:
+                lines.append(f"場景中存在的物品（僅限這些）："
+                             f"{'、'.join(scene_items)}")
+            else:
+                lines.append("場景中沒有可拾取的物品。")
+            if party_inventory:
+                for ch, items in party_inventory.items():
+                    if items:
+                        lines.append(f"{ch} 攜帶：{'、'.join(items)}")
+            lines.append(
+                "⚠️ 絕不提及不在以上清單中的任何物品名稱——"
+                "如果你描述的場景需要一件道具，用泛稱"
+                "（「某件工具」「雜物」），不要發明具體物品名。"
+                "提及清單中的物品時用粗體：**治療藥水**。")
+            items_block = "\n".join(lines) + "\n"
+
         # v3 lesson: the player's own words must be answered, not ignored
         player_block = ""
         if player_input:
@@ -53,6 +77,7 @@ class Narrator:
         # v3 lesson: most critical rules at the END (small models attend
         # most to recent tokens — canonical tail principle)
         tail = (
+            f"{items_block}"
             f"{player_block}"
             "\n=== 最後指示（最高優先）===\n"
             "· 繁體中文，絕不使用簡體字\n"

@@ -225,11 +225,18 @@ class V4Service:
             if is_repetition(" ".join(safe_hints), self._recent_narrations):
                 rep_hint = ("⚠️ 你最近的敘述幾乎相同——這次必須完全不同。"
                             "換一個場景細節、感官或節奏。")
+            # item inventory: what the narrator may mention
+            s = g.world.here
+            scene_items = ([n for n, _ in s.ground_items]
+                           + [n for n, _ in s.hidden_items])
+            party_inv = {ch: [n for n, _ in stacks]
+                         for ch, stacks in g.inventory.items()}
             narration = await self.narrator.narrate(
                 safe_facts, g.world.here.name, safe_brief, hints=safe_hints,
                 npc_knows=safe_knows, npc_name=npc_name,
                 extra_directive=rep_hint, on_delta=on_delta,
-                player_input=map_out(player_input, pmap))
+                player_input=map_out(player_input, pmap),
+                scene_items=scene_items, party_inventory=party_inv)
             # force Traditional Chinese (models skew Simplified)
             try:
                 from opencc import OpenCC
@@ -238,6 +245,15 @@ class V4Service:
                 pass
             # v3 guard: scrub fake dice/verdicts from narration
             narration, was_scrubbed_n = scrub_narration(narration)
+            # item guard: bolded items must exist in the inventory
+            from .guards import validate_narration_items
+            all_known = scene_items + [i for items in party_inv.values()
+                                       for i in items]
+            narration, found_items = validate_narration_items(
+                narration, all_known)
+            for fi in found_items:
+                if fi not in scene_items:
+                    scene_items.append(fi)
             if was_scrubbed_n:
                 g.ledger.add("engine", "guard",
                              "已從敘事中清除假骰/判定文字")

@@ -130,3 +130,30 @@ def scrub_input(text: str) -> tuple[str, bool]:
             changed = True
             t = new
     return t, changed
+
+
+# ---- item inventory guard (post-narration) ----
+# The narrator is told which items exist. If it bolds an item name,
+# the engine validates it against the known inventory. Unknown bolded
+# items are stripped (generic terms stay as prose).
+
+_BOLD_ITEM_RE = re.compile(r"\*\*([^*]{2,40})\*\*")
+
+
+def validate_narration_items(text: str, known_items: list) -> tuple[str, list]:
+    """Check bolded item mentions against the known inventory.
+    Returns (clean_text, [valid_item_names_found]).
+    Unknown bold items are unbolded (kept as prose, not stripped)."""
+    valid = []
+
+    def check(m):
+        name = m.group(1).strip()
+        # is this a known item (fuzzy match)?
+        for k in known_items:
+            if name == k or name in k or k in name:
+                valid.append(k)
+                return m.group(0)  # keep the bold — it's a real item
+        return name  # unbold: not a real item, keep as prose
+
+    clean = _BOLD_ITEM_RE.sub(check, text)
+    return clean, valid
