@@ -1,6 +1,6 @@
 # V4 Summary — Engine-Driven Architecture (Current)
 
-> Version: v4 (active) · Updated: 2026-10-09
+> Version: v4 (active) · Updated: 2026-10-10
 > Architecture: engine does 70% (rules, state, combat, dice), LLM does 30%
 > (reading intent, writing prose). Game fully playable without any LLM.
 > Full v1→v4 evolution: see `EVOLUTION.md`
@@ -11,6 +11,7 @@
 
 ```
 Player text ──→ [Digestor 12b] ──→ Intent JSON
+         (or /combat dropdowns ──────→ Intent directly, no LLM)
                                             │
                                             ▼
                                    [GAME ENGINE]     ←── no LLM needed
@@ -31,9 +32,9 @@ Player text ──→ [Digestor 12b] ──→ Intent JSON
 | Player (10) | Admin (4) |
 |---|---|
 | `/pc name occupation` — create character | `/explore-admin text char` |
-| `/explore text` — freeform action | `/combat-admin` |
+| `/explore text` — freeform action (digestor→engine) | `/combat-admin` |
 | `/confirm` — confirm pending action | `/roll-admin expr char` |
-| `/combat action target move` — RPG menu | `/give-admin char item qty` |
+| `/combat action target move` — RPG menu (no LLM) | `/give-admin char item qty` |
 | `/inventory [char]` — items + slots + moves | |
 | `/roll [expr]` — dice (settles pending checks) | |
 | `/give item [to]` — transfer to party member | |
@@ -42,91 +43,103 @@ Player text ──→ [Digestor 12b] ──→ Intent JSON
 | `/help` | |
 
 **Channel keywords** (instant, no LLM): `status` `inv` `moves` `scene`
-**Plain text** = table talk (silently ignored, no reaction, no reply)
+**Plain text** = table talk (silently ignored)
 
-## 3. Dice Mechanics
+## 3. Input Paths
+
+| Path | Flow | LLM? |
+|---|---|---|
+| `/combat` (dropdowns) | Structured Intent directly → engine | None for intent |
+| `/explore` (freeform) | Scrub → digestor (12b) → Intent → engine | 12b for intent |
+| Fallback (digestor down) | Cantonese-aware keyword parser → Intent | None |
+| Channel keywords | Direct engine query | None |
+
+**Digestor** handles: Cantonese (劈/揼/篤/執/攞), English code-mixing
+("i picked a sword"), paraphrase to written Chinese first, action
+meanings (not just words). See `v4/digestor.py` prompt for the full
+action definition table.
+
+## 4. Dice Mechanics
 
 | Path | Flow | Agency |
 |---|---|---|
-| `/combat` (structured) | Player picks action → engine rolls immediately | Consent given by selection |
-| `/explore` (freeform) | Engine shows check card → player `/roll d20` → engine settles with that die | Player rolls their own dice |
-| `/roll d20` (no pending) | Utility roll, no game effect | — |
-| NPC talk (hostile) | CHA check card → player rolls | Player rolls |
-| NPC talk (friendly) | No check needed, NPC engages | — |
-| Attack | Engine rolls d20+bonus vs AC, damage, HP, death | Structured = auto |
-| Creative action | Engine shows ability check card → player rolls | Player rolls |
+| `/combat` | Player picks action → engine rolls immediately | Consent by selection |
+| `/explore` (check) | Engine shows check card → player `/roll d20` → engine settles | Player rolls |
+| `/explore` (take) | Engine moves ground item to inventory (no roll needed) | — |
+| `/explore` (talk NPC) | Friendly: no check. Hostile: CHA check card | Player rolls |
+| `/explore` (claim) | "我升到99級" → narrator responds in-character, engine denies | — |
 
-## 4. Core Modules (v4/)
+## 5. Core Modules (v4/)
 
-| Module | Lines | Responsibility |
-|---|---|---|
-| `intent.py` | 80 | Intent dataclass + deterministic keyword parser |
-| `world.py` | 80 | Scene graph, NPC (with `knows`), encounters |
-| `turn.py` | 149 | Game state: party, combat, inventory, spell slots |
-| `rules_core.py` | ~470 | validate + resolve — the ONLY write path |
-| `ledger.py` | 55 | Append-only event log (replayable, serializable) |
-| `digestor.py` | ~90 | 12b: freeform text → Intent JSON |
-| `narrator.py` | ~80 | 27b: skeletons + facts → prose (120-200 字) |
-| `templates.py` | ~180 | Deterministic prose + scene context + suggestions |
-| `guards.py` | 132 | v3 defenses: placeholders, scrubbing, repetition |
-| `service.py` | ~250 | Orchestration, persistence, per-channel games |
-| `cli.py` | 230 | No-LLM REPL + seeded selftest |
-
-## 5. Shared Math (engine/)
-
-| Module | Lines | Responsibility |
-|---|---|---|
-| `charlib.py` | 158 | AC, PB, spell slots, save/skill proficiencies |
-| `dice.py` | 124 | Dice expressions (4d6kh3, adv/dis, ±N) |
-| `checks.py` | 148 | Total modifier calculator |
-| `moves.py` | ~100 | Class move tables + `compute_attack_moves` |
-
-## 6. Guards (v3 Lessons Applied)
-
-| Guard | What it prevents |
+| Module | Responsibility |
 |---|---|
-| Placeholder names | Narrator transliterates/renames characters |
+| `intent.py` | Intent dataclass + deterministic parser (Cantonese-aware fallback) |
+| `world.py` | Scene graph, NPC (with `knows`), encounters |
+| `turn.py` | Game state: party, combat, inventory, spell slots |
+| `rules_core.py` | validate + resolve — the ONLY write path |
+| `ledger.py` | Append-only event log (replayable) |
+| `digestor.py` | 12b: freeform → Intent JSON (paraphrase, action meanings) |
+| `narrator.py` | 27b: skeletons + facts → prose (streaming, guards applied) |
+| `templates.py` | Prose skeletons + scene context + suggested actions |
+| `guards.py` | v3 defenses: placeholders, scrubbing, repetition, s2t |
+| `service.py` | Orchestration, per-channel games, persistence |
+
+## 6. Actions (15)
+
+| Action | Trigger | Engine behaviour |
+|---|---|---|
+| `attack` | /combat, /explore | d20+bonus vs AC → damage → HP → death |
+| `take` | /explore (執/撿/pick) | Move ground/hidden item to inventory |
+| `move` | /explore (去/go) | Scene change + encounter check |
+| `use` | /combat, /explore | Apply item (potions heal, etc.) |
+| `cast` | /combat, /explore | Consume spell slot, narrate effect |
+| `talk` | /explore | NPC check (CHA if hostile), narrator voices NPC |
+| `search` | /explore (搜索) | WIS check → reveal hidden items |
+| `creative` | /explore (自創) | Ability check for improvised method |
+| `claim` | /explore (我升到99級) | Narrator responds, engine denies |
+| `meta` | /explore (目標/感受) | Narrator responds, scene context shown |
+| `chat` | plain text | Silently ignored (table talk) |
+| `rest` | /explore (休息) | Short: hit dice. Long: full restore |
+| `give` | /give | Transfer item between party members |
+| `check` | /explore (檢定) | Ability check with player roll |
+| `pass` | /explore (等待) | Skip turn (combat) |
+
+## 7. Guards (v3 Lessons Applied)
+
+| Guard | Prevents |
+|---|---|
+| Placeholder names `[PC1]` | Narrator transliterates characters |
 | Fake-dice scrubbing | Narrator writes dice results |
 | Repetition guard | Narrator spirals into identical outputs |
-| Language check | Non-Chinese narration reaches players |
-| Input sanitization | Player injects [PCn] or SYSTEM VERDICT |
-| Ownership check | Player controls another player's character |
-| NPC knows lists | Narrator invents quest content via NPC dialogue |
+| Language check + OpenCC s2t | Non-Chinese / Simplified output |
+| Input sanitization | `[PCn]` / `SYSTEM VERDICT` injection |
+| Ownership (user_id) | Player controls another's character |
+| NPC `knows` lists | Narrator invents quest content |
+| Scrub before digestor | Injection reaches the LLM |
 
-## 7. Per-Channel Games
+## 8. Per-Channel Games
 
 Each Discord channel gets its own independent game:
-- State file: `v4_state_<channel_id>.json`
-- Env: `V4_CHANNEL_IDS=<id1>,<id2>,...` (comma-separated)
-- Characters, world, inventory, ledger — all isolated per table
+- State: `v4_state_<channel_id>.json`
+- Env: `V4_CHANNEL_IDS=<id1>,<id2>,...`
+- Everything isolated: characters, world, inventory, ledger
 
-## 8. Turn Output Format
+## 9. Turn Output (v3-style streaming UX)
 
-Every turn shows:
-1. **Public echo**: `🎭 **PlayerName** action text`
-2. **Engine output** (instant): check math, damage, HP, combat status
-3. **Turn context**: 📍 scene + ❤️ party HP + 👉 suggested actions
-4. **Narration** (8-15s later): 📖 prose with hook at the end
+```
+t=0s   🎭 **PlayerName** action text          ← echo (immediate)
+t=0s   📖 DM 正在寫作…                         ← placeholder
+t=0s   🎲 engine result + 📍 scene + 👉 你可以  ← replaces placeholder
+t=2s   📖 海風鹹濕地吹拂著… ▍                    ← streaming (2s edits)
+t=10s  📖 full narration                       ← complete
+```
 
-## 9. What's Not Yet Implemented
+## 10. What's Parked
 
 | Feature | Status |
 |---|---|
-| Director LLM | Not implemented — proposes new scenes/NPCs |
-| SRD retrieval | rules.db exists, not wired to v4 check DCs |
+| Director (new objects) | Design ready — typed templates + engine gate |
+| SRD retrieval | rules.db exists, not wired to v4 |
 | Difficulty scaling | Not in v4 world model |
 | Death save counters | Not implemented |
-| Conditions ([[cond:]]) | Not implemented |
-| Grid/distance | Not implemented |
-| Context compression | Ledger grows unbounded (fine for now) |
-
-## 10. Selftest
-
-```bash
-python v4/cli.py selftest          # deterministic (seed=7)
-V4_SEED=42 python v4/cli.py selftest  # different seed
-```
-
-Covers: route rejection, encounter spring, check flow (pending → roll →
-resolve), slot economy, potion healing, target denial, combat rotation,
-long rest, ledger persistence.
+| Conditions | Not implemented |
