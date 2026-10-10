@@ -14,9 +14,13 @@ from .intent import ACTIONS, Intent, parse_command
 
 
 class Digestor:
-    def __init__(self, llm_url: str, model: str = "gemma3:12b-it-qat"):
+    def __init__(self, llm_url: str, model: str = "qwen3.5:35b",
+                 think: bool | None = False):
         self.url = llm_url.rstrip("/")
         self.model = model
+        # reasoning models MUST run with think off here or the budget
+        # is consumed before any JSON is emitted (None = model default)
+        self.think = think
 
     async def digest(self, text: str, party_names, scene_name: str = "",
                      exits=(), known_targets=()) -> Intent:
@@ -118,13 +122,24 @@ class Digestor:
             "拿不準時，偏向遊戲動作（玩家的行動不能被漏掉）。\n"
             f'玩家輸入:「{text}」→')
         try:
+            # native /api/chat (the OpenAI-compat endpoint ignores the
+            # think toggle that reasoning models require)
+            body = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+                "options": {"temperature": 0.1, "num_predict": 200}}
+            if self.think is not None:
+                body["think"] = self.think
             async with httpx.AsyncClient(timeout=60) as c:
-                r = await c.post(f"{self.url}/v1/chat/completions", json={
-                    "model": self.model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.1, "max_tokens": 200})
+                r = await c.post(f"{self.url}/api/chat", json=body)
                 r.raise_for_status()
-                out = r.json()["choices"][0]["message"]["content"] or ""
+                out = r.json().get("message", {}).get("content") or ""
+            try:
+                from opencc import OpenCC
+                out = OpenCC("s2t").convert(out)  # 剑 -> 劍 (item names!)
+            except ImportError:
+                pass
             m = re.search(r"\{.*\}", out, re.S)
             data = json.loads(m.group(0))
             action = data.get("action", "")

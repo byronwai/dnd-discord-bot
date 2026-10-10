@@ -135,7 +135,8 @@ def render_hint(entry, game=None) -> str:
         return f"{actor} 眯起眼睛盯著 {target}，不放過任何一絲破綻。"
 
     if kind == "skill":
-        sk = d.get("skill", "")
+        from engine.charlib import SKILL_LABEL
+        sk = SKILL_LABEL.get(d.get("skill", ""), d.get("skill", "技能"))
         tgt = d.get("target", "")
         return (f"{actor} 運用{sk}"
                 + (f"應付 {tgt}" if tgt else "")

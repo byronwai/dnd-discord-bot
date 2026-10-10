@@ -64,15 +64,16 @@ _END_PUNCT = "。．.!！?？…」』）)\"'"
 
 class V4Service:
     def __init__(self, data_dir: str, llm_url: str,
-                 digest_model: str = "gemma3:12b-it-qat",
-                 narr_model: str = "gemma3:27b-it-qat",
+                 digest_model: str = "qwen2.5:7b-instruct",
+                 narr_model: str = "qwen3.5:35b",
                  channel_id: str = "",
-                 narr_think: bool | None = None):
+                 narr_think: bool | None = False,
+                 digest_think: bool | None = None):
         # per-channel state: each Discord table gets its own game
         fname = f"v4_state_{channel_id}.json" if channel_id else "v4_state.json"
         self.path = os.path.join(data_dir, fname)
         self.channel_id = channel_id
-        self.digestor = Digestor(llm_url, digest_model)
+        self.digestor = Digestor(llm_url, digest_model, think=digest_think)
         self.narrator = Narrator(llm_url, narr_model, think=narr_think)
         # narration that never finished (narrator silent, or prose cut
         # mid-sentence): /continue resumes it before anything else.
