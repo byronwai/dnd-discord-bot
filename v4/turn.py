@@ -145,7 +145,9 @@ class Game:
     # ---------- combat ----------
 
     def start_encounter(self, seed: int = None) -> list[dict]:
-        """Spawn this scene's encounter (once) and roll initiative."""
+        """Spawn this scene's encounter (once) and roll initiative.
+        v5: enemies scale to the party tier (CR budgeting)."""
+        from engine.cr import scale_for_party
         scene = self.world.current
         foes = self.encounters.get(scene)
         if not foes or self.combat.active:
@@ -157,6 +159,7 @@ class Game:
             order.append({"name": name, "init": rng.randint(1, 20) + (dex - 10) // 2,
                           "npc": False})
         for foe in foes:
+            scale_for_party(foe, self.party)
             foe.initiative = rng.randint(1, 20) + 2
             self.enemies[foe.name] = foe
             order.append({"name": foe.name, "init": foe.initiative, "npc": True})

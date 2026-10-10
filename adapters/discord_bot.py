@@ -32,7 +32,7 @@ def _split(text: str, limit: int = 1900):
     return chunks
 
 
-HELP_TEXT = """🎲 **v4 引擎指令 / Commands**（玩家 15 · 管理 9）
+HELP_TEXT = """🎲 **v5 引擎指令 / Commands**（玩家 16 · 管理 10）
 
 **玩家 / Player**
 `/pc <名字> <職業>` — 建立角色（屬性由系統公正擲骰）
@@ -58,6 +58,7 @@ HELP_TEXT = """🎲 **v4 引擎指令 / Commands**（玩家 15 · 管理 9）
 `/inventory` — 物品欄＋法術格＋18 技能（★熟練）＋招式
 `/give <item> [to]` — 給隊友；不填 to＝放在地上（可拾回）
 `/status` — 隊伍 HP／法術格／場景／戰鬥／📜已知情報
+`/rules <關鍵字>` — 查 SRD（火球術/哥布林/豁免…即時無 LLM）
 `/continue` — 未完成的敘事先逐字續寫；否則推進遊戲
 `/help` — 本說明
 
@@ -67,6 +68,7 @@ HELP_TEXT = """🎲 **v4 引擎指令 / Commands**（玩家 15 · 管理 9）
 `/observe-admin` — 以任意角色執行對應戰鬥行為（自動完成同玩家版）
 `/roll-admin <expr> <char>` — 代擲（d20 會結算待定檢定）
 `/give-admin <char> <item> [qty]` — 給物品
+`/inspire-admin <char>` — 給靈感（一次性優勢）
 
 **頻道內關鍵字**（直接打字，即時回應、無 LLM）：
 `status` `inv` `moves` `scene`
@@ -703,6 +705,87 @@ class DiscordBot(discord.Client):
                     f"🎒 {giver} 把 {item} 放在地上（{g.world.here.name}）"
                     "——之後可以拾回")
             svc._v4_service(str(interaction.channel_id))._save()
+
+        # ---- /rules (SRD retrieval, zero LLM) ----
+
+        def _rules_db_path() -> str:
+            data_dir = os.environ.get("DATA_DIR", "data")
+            return os.environ.get(
+                "RULES_DB", os.path.join(data_dir, "rules.db"))
+
+        # the SRD is English-titled; map common zh queries to it
+        _SRD_ZH = {
+            "哥布林": "Goblin", "地精": "Goblin", "狗頭人": "Kobold",
+            "龍": "Dragon", "幼龍": "Dragon", "獸人": "Orc",
+            "骷髏": "Skeleton", "殭屍": "Zombie", "蜘蛛": "Spider",
+            "魚人": "Merfolk", "史萊姆": "Slime", "巨魔": "Troll",
+            "巨人": "Giant", "精靈": "Elf", "矮人": "Dwarf",
+            "半身人": "Halfling", "法師": "Wizard", "牧師": "Cleric",
+            "戰士": "Fighter", "盜賊": "Rogue", "遊俠": "Ranger",
+            "術士": "Warlock", "野蠻人": "Barbarian", "吟遊詩人": "Bard",
+            "德魯伊": "Druid", "聖武士": "Paladin",
+            "火球": "Fireball", "火球術": "Fireball",
+            "治療": "Healing", "治療藥水": "Potion of Healing",
+            "藥水": "Potion", "魔法飛彈": "Magic Missile",
+            "閃電": "Lightning", "隕石": "Meteor",
+            "先攻": "Initiative", "豁免": "Saving Throw",
+            "擅長": "Proficiency", "休息": "Rest",
+            "死亡豁免": "Death Saving Throw",
+            "掩蔽": "Cover", "擒抱": "Grapple", "衝刺": "Dash",
+            "閃避": "Dodge", "協助": "Help", "撤退": "Disengage",
+        }
+
+        def _srd_query_terms(q: str) -> list:
+            terms = [q]
+            for zh, en in _SRD_ZH.items():
+                if zh in q:
+                    terms.append(en)
+            return list(dict.fromkeys(terms))
+
+        def rules_text(query: str) -> str:
+            """Top SRD matches by title, then body — deterministic,
+            no embeddings, no LLM. zh queries map to English titles."""
+            import sqlite3
+            q = (query or "").strip()
+            if not q:
+                return "❓ 查詢什麼？例：`/rules 火球術`、`/rules 哥布林`"
+            try:
+                conn = sqlite3.connect(
+                    f"file:{_rules_db_path()}?mode=ro", uri=True,
+                    timeout=2.0)
+                try:
+                    rows = []
+                    for term in _srd_query_terms(q):
+                        rows = conn.execute(
+                            "SELECT title, kind, text FROM chunks "
+                            "WHERE title LIKE ? "
+                            "ORDER BY length(title) LIMIT 3",
+                            (f"%{term}%",)).fetchall()
+                        if rows:
+                            break
+                    if not rows:
+                        rows = conn.execute(
+                            "SELECT title, kind, text FROM chunks "
+                            "WHERE text LIKE ? LIMIT 3",
+                            (f"%{q}%",)).fetchall()
+                finally:
+                    conn.close()
+            except sqlite3.Error as e:
+                return f"⚠️ 規則庫不可用（{e}）"
+            if not rows:
+                return f"🔍 SRD 裡沒有「{query}」的條目（試英文名？）"
+            out = [f"📚 **SRD 查詢：{query}**"]
+            for title, kind, text in rows:
+                body = " ".join((text or "").split())[:280]
+                out.append(f"\n**{title}**（{kind}）\n{body}…")
+            return "\n".join(out)[:1900]
+
+        @self.tree.command(name="rules",
+                           description="查 SRD 規則（法術/怪物/物品，即時無 LLM）/ SRD lookup")
+        @app_commands.describe(query="關鍵字（法術名、怪物名、規則）")
+        async def rules_cmd(interaction: discord.Interaction,
+                            query: str):
+            await interaction.response.send_message(rules_text(query))
 
         # ---- /status ----
 

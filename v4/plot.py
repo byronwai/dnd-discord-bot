@@ -89,16 +89,23 @@ def _apply_effect(g, eff: dict, out: list):
                     n["disposition"] = spec.get("to", "neutral")
                     return
     if "spawn" in eff:
-        from .world import Enemy
         spec = eff["spawn"]
         s = _scene_by(g, spec.get("scene", ""))
         e = spec.get("enemy", {})
         if s is not None and e:
-            g.encounters.setdefault(s.id, []).append(Enemy.make(
-                e.get("name", "敵人"), int(e.get("hp", 8)),
-                int(e.get("ac", 13)), int(e.get("attack_bonus", 3)),
-                e.get("dmg", "1d6")))
-            out.append(f"👀 {e.get('name', '敵人')} 出沒於 {s.name}……")
+            if e.get("cr"):  # cite a CR band instead of raw stats
+                from engine.cr import make_by_cr
+                foe = make_by_cr(e.get("name", "敵人"), e["cr"])
+            else:
+                from .world import Enemy
+                foe = Enemy.make(
+                    e.get("name", "敵人"), int(e.get("hp", 8)),
+                    int(e.get("ac", 13)), int(e.get("attack_bonus", 3)),
+                    e.get("dmg", "1d6"))
+            from engine.cr import scale_for_party
+            scale_for_party(foe, g.party)
+            g.encounters.setdefault(s.id, []).append(foe)
+            out.append(f"👀 {foe.name} 出沒於 {s.name}……")
     if "clock" in eff:
         pass  # handled by the caller (needs the state dict)
     if "cond" in eff:
