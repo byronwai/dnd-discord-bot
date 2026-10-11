@@ -1,4 +1,4 @@
-# D&D DM Bot — v4 Engine-Driven
+# D&D DM Bot — v6 · Engine × Generative Director
 
 Self-hosted Dungeon Master for Discord. **Game engine does 70%** (rules,
 state, combat, dice); **LLM does 30%** (reading player intent, writing

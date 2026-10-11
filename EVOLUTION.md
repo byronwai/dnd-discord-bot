@@ -1,10 +1,11 @@
-# D&D DM Bot — Complete Evolution: v1 → v4
+# D&D DM Bot — Complete Evolution: v1 → v6
 
 > A detailed workflow document explaining how the logic, infrastructure,
-> setup, and architecture changed across four major versions, including
+> setup, and architecture changed across six major versions, including
 > every mechanism that was added, removed, or transformed.
 >
-> Timeline: 2026-10-07 → 2026-10-09 (two days of marathon development)
+> Timeline: 2026-10-07 → 2026-10-11 (five days; v5/v6 landed in one day
+> each driven by live player feedback)
 
 ---
 
@@ -13,9 +14,15 @@
 ```
 v1          v2              v3                  v4
 Pi + 3B     GB10 + 27b      Hardened v3         Engine-driven
-2-platform  1-platform      27 commands         13 commands
+2-platform  1-platform      27 commands         13→24 commands
 LLM-driven  Tag protocol    Anti-cheat layer    Engine core
             v1              v2 + hardening      No LLM required
+
+v5                            v6
+Responsiveness inversion      Live-feedback era
+Quiet engine · Director       Generative Director LLM
+Plot spine · skills · XP      Action slots · loot · quest chain
+qwen models (13× faster)      27 commands · feel fixes
 ```
 
 ---
@@ -30,7 +37,8 @@ LLM-driven  Tag protocol    Anti-cheat layer    Engine core
 | **Context** | 4k tokens | 16k tokens | 16k → 24k | 24k (expandable) |
 | **Platforms** | Discord + Telegram | Discord only | Discord only | Discord only |
 | **Processes** | 1 bot | 1 bot + 1 health | 1 bot + 1 health | 1 bot + 1 health |
-| **Storage** | SQLite | SQLite | SQLite + events + npcs + lore | v4_state.json (JSON) |
+| **Storage** | SQLite | SQLite | SQLite + events + npcs + lore | v4_state.json (JSON) | per-channel states + plot.json + gamerules.json + rules.db wired |
+| **v5/v6 Models** | — | — | — | — | narrator qwen3.5:35b (think off, 2.5s stream) · digestor/director qwen2.5:7b (<1s) · gemma fully removed |
 
 ### Why the hardware changed
 The Pi couldn't run models larger than 3B-Q4 at usable speed (4 tok/s
@@ -327,30 +335,91 @@ sudo systemctl start dm-bot dnd-health
 
 ---
 
-## 6. What v4 Still Doesn't Have (Parked)
+## 6. What v4 Parked — v5/v6 Delivered
 
-| Feature | Status | Design |
+| Feature (parked in v4) | Delivered in | How |
 |---|---|---|
-| Director LLM | Not implemented | Proposes new scenes/NPCs/encounters; engine gates entry |
-| SRD retrieval | Not wired to v4 | rules.db exists; needs integration into check DCs |
-| Difficulty scaling | Not in v4 world model | Enemy HP/AC multipliers based on party level |
-| Context compression | Not needed yet | Ledger grows; scene-blocked injection when it matters |
-| Death save counters | Not implemented | 3 successes/failures tracking at HP 0 |
-| Conditions ([[cond:]]) | Not implemented | Blinded/Frightened/Prone mechanical effects |
-| Grid/distance | Not implemented | Tactical positioning |
-| CR budgeting | Not implemented | Encounter difficulty scaling |
+| Director LLM | v5 0a + v6 | v5: deterministic prop materialization; v6: generative Director (`v4/director_llm.py`) — unplanned SCENES（向前走 → 沉沒之宮）and unplanned discoveries, typed JSON proposed by LLM, canonized by the engine gate |
+| SRD retrieval | v6 | `/rules` — LIKE search over rules.db (2,918 chunks) with a zh→EN alias map（哥布林→Goblin）, zero LLM |
+| Difficulty scaling / CR budgeting | v6 | `engine/cr.py` — party tier (Lv 1-3/4-6/7+) scales every encounter at spawn; plot spawns may cite CR bands |
+| Death save counters | v5 seed 3 | engine-rolled once per round: <10 fail / nat1 two fails / nat20 revive; 3 stable / 3 perma-dead |
+| Conditions | v5 seed 3 | `conds` on party entries — poisoned (attack disadvantage), inspired (one-shot advantage), timed expiry |
+| XP / levels / loot (v2 regression) | v6 | `engine/loot.py` — kill XP (10×hp+20), level-ups (HP/slots/PB), weighted loot drops to the scene, AUTHORED loot rides enemies (kill 巴鐸 → the queen's necklace drops); `/xp-admin` |
+| Strict turn order (unfun) | v6 | per-round ACTION SLOTS: any PC acts in any order once per round; enemies resolve when all acted — nobody waits |
+
+### v6 remaining (parked again)
+- Semantic SRD retrieval (vector index exists, /rules is LIKE-only)
+- Per-channel plot.json overrides; real-time clocks
+- Full condition set (cover/grapple/concentration); player-rolled death saves
+- Button hybrid UI on turn cards; CI on push; state schema versioning
+
 
 ---
 
-## 7. File Location Cross-Reference
+# v5 — The Responsiveness Inversion (2026-10-10)
 
-| Version | Code Location | Status |
+> Trigger: **"玩家覺得 v1 更好玩"** — players don't experience integrity,
+> they experience responsiveness. v4 delivered real numbers with the
+> referee's face pushed into the players'. v5's equation:
+> **illusory freedom × real consequences (9 × 9)**.
+
+## What changed (v4 → v5)
+
+| Mechanism | v4 | v5 |
 |---|---|---|
-| v1 | Not preserved separately (evolved into v2) | Lost |
-| v2 | `legacy/` (dm.py, state.py, commands.py) | Archived |
-| v3 | `legacy/` (same files + design docs) | Archived |
-| v4 | `v4/` + `engine/` + `adapters/` + `health/` | **Active** |
-| Design docs | `DESIGN.md` (v3), `V4_DESIGN.md`, `V3_SUMMARY.md` | Reference |
-| This document | `EVOLUTION.md` | Living |
+| Checks | every action rolls, cards everywhere | **passive auto-success** (10+mod ≥ low DC = no roll); empty-scene searches don't card |
+| Denials | 🚫 dead-ends | **narrated 吐槽** — the world answers; rotation denials stay engine-only |
+| Untracked props | 「無中生有」snark-deny (the phantom 木雕) | **Director default-YES**: inert props materialize on interaction; dice/value/plot items stay blocked |
+| Creative actions | generic check, no consequence | **affordances**: throw anything (improvised attack / lands in scene / sea = gone), ignite (scene fire = engine state ticking damage) |
+| Story | narrator improvises | **plot spine** (`plot.json`): clocks + triggers fire typed beats (npc_move/spawn/disposition/cond/inspire/endings) into the SAME turn |
+| Survival | HP0 = stuck | death saves (perma-death), conditions, **Inspiration**（補償機制, `/inspire-admin`） |
+| Checks (cont.) | single dice | group stealth（我哋匿埋 = half succeed all succeed）, Help action（aided checks roll two dice） |
+| Skills wired | 2 of 18 | all 18 with mechanical effects |
+| Intel | narrator vibes | knows + **disclosed** tracking: one NEW fact per successful exchange, `/status` 已知情報, 已問出 x/y |
+| Narration | gemma3:27b, 33s, POV drift | **qwen3.5:35b (think off)** 2.5s streaming via native `/api/chat`; digestor qwen2.5:7b (9/9 routing); gemma removed |
+| Rules | scattered in prompts | **gamerules.json** — single source of truth (tone + canon + constraints) injected into every narration |
+| Output UX | placeholder replaced by verdict | **verdict first (instant), narration streams into its own message and stays**; /roll settles auto-continue answering the player's ORIGINAL words |
+| Tests | selftest only | +18 offline pytest regressions (0.35s, zero LLM) |
 
-*Generated 2026-10-09 · 41 git commits · 4,094 lines active code*
+## v5 key lessons
+- Small models copy EXAMPLE TEXT verbatim — the 千兩黃金 parrot was my
+  own prompt example poisoning outputs; examples show STRUCTURE only
+- Reasoning models return EMPTY via the OpenAI-compat endpoint (thinking
+  eats the token budget; the endpoint ignores `think`) — native `/api/chat`
+- The v4 anti-cheat effort solved problems players never had; responsiveness
+  was the product
+
+---
+
+# v6 — The Live-Feedback Era (2026-10-10/11)
+
+> Trigger: **"the game feels bad now"** — a night of live play where every
+> failure had the same shape: the machine's truth and the story's truth
+> disagreed, and the machine won loudly, in public.
+
+## What changed (v5 → v6)
+
+| Mechanism | v5 | v6 |
+|---|---|---|
+| Turn order | strict initiative rotation (players WAIT) | **per-round ACTION SLOTS**: any PC acts in any order, once per round; the enemy round resolves when all have acted — Discord is not a table |
+| Combat bugs | corpse battles possible | dead encounter entries never respawn (end_combat didn't clear scene lists — re-entering spawned corpses); stuck combats self-heal（戰場已清空） |
+| Failed attacks | denied attack still burned the turn | only EXECUTED attacks advance; move autocomplete hides slot-exhausted moves |
+| Loot / XP / levels | none (v2 regression) | kill XP + level-ups + weighted loot drops; **authored loot** rides enemies — kill 巴鐸 → 海妖女王的項鍊 drops; `/xp-admin` (backfilled the party to Lv4) |
+| Quest items | narrator could fake them (項鍊碎片 phantom) | canon is BACKGROUND, never scene content — narrator may not place/drop/tease plot items; legitimate path = authored NPC loot via `npc_spawn` |
+| Unplanned places | 「沒有通往前方」denials | **Generative Director LLM** (`v4/director_llm.py`): walking into the unplanned proposes a typed scene; the ENGINE gate canonizes it (bidirectional back-exit, NPC with empty knows, 12-scene cap). 向前走 → 沉沒之宮 |
+| Unplanned finds | static ambient table | Director LLM proposes scene-fitting inert props（鏽跡斑駁的發條公雞）, classified before materializing |
+| Creative tactics | only throw/ignite had effects | combat creatives carry consequences: foul an enemy → next attack advantage; improvised cover → attackers disadvantage |
+| Story items | RNG 1.7% for a named find | **named search** (~50%): 搵下有冇魚鉤 matches prop tables by name/tail |
+| SRD | rules.db unwired | `/rules` zh-alias retrieval |
+| Difficulty | fixed encounters | CR budgeting by party tier |
+| Latency | 40s turns (model reloads) | `OLLAMA_KEEP_ALIVE=30m` — models stay resident, 2-5s turns |
+
+## v6 key lessons
+- Test with PRODUCTION-SHAPED data: the Entry.target crash and the corpse
+  battles were both paths tests never touched (short-circuits everywhere)
+- A denied action must never consume the player's turn
+- The narrator's tease is a promise the engine must keep — or the narrator
+  must not tease it
+- Model thrash costs more than model size (keep-alive > bigger model)
+
+*Generated 2026-10-11 · v6 active · see `V4_SUMMARY.md` / `V5_SUMMARY.md` for archive detail.*
